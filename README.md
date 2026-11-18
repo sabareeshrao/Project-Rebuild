@@ -37,3 +37,14 @@ python -m pip install -e ".[dev]"
 ```
 
 PyTorch is an explicit project dependency; a GPU is **not** required for the first lessons.
+
+## First runnable lessons
+
+```bash
+python examples/01_token_batches.py
+python examples/02_next_token_pairs.py
+python -m pytest
+```
+
+Each lesson in `lessons/` explains the problem, a code experiment, and a
+question to answer before moving to the next commit.
