@@ -22,6 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--eval-every", type=int, default=10)
     parser.add_argument("--eval-batches", type=int, default=4)
+    parser.add_argument("--validation-mode", choices=("sampled", "full"), default="sampled")
+    parser.add_argument("--grad-clip", type=float, default=None)
+    parser.add_argument("--warmup-steps", type=int, default=0)
+    parser.add_argument("--lr-decay-steps", type=int, default=None)
+    parser.add_argument("--min-lr", type=float, default=0.0)
     parser.add_argument("--output", default="out/char_gpt.pt", help="Final (or restored) inference model")
     parser.add_argument("--best-output", default="out/best_char_gpt.pt", help="Lowest validation-loss model")
     parser.add_argument("--history-file", default="out/training_history.json")
@@ -44,6 +49,11 @@ def main(argv: list[str] | None = None) -> int:
             eval_batches=args.eval_batches, history=history,
             restore_best=args.restore_best,
             best_checkpoint_path=args.best_output,
+            max_grad_norm=args.grad_clip,
+            warmup_steps=args.warmup_steps,
+            lr_decay_steps=args.lr_decay_steps,
+            min_lr=args.min_lr,
+            validation_mode=args.validation_mode,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -54,6 +64,13 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "model_config": asdict(model.config),
         "restored_best": args.restore_best,
+        "training_controls": {
+            "grad_clip": args.grad_clip,
+            "warmup_steps": args.warmup_steps,
+            "lr_decay_steps": args.lr_decay_steps,
+            "min_lr": args.min_lr,
+        },
+        "validation_mode": args.validation_mode,
         "metrics": metrics,
         "evaluations": history,
     }

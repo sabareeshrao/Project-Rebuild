@@ -532,3 +532,34 @@ python -m pytest
 but they are not a complete validation-set evaluation. The included
 tiny story is educational; better held-out loss does not establish
 useful or coherent language generation.
+
+## Training stability and full-split evaluation (commits 081–085)
+
+These lessons add optional **global gradient clipping**, nanoGPT-style
+**linear warmup and cosine learning-rate decay**, and an alternative
+validation method that scores **every next-token transition once** in
+consecutive nonoverlapping chunks. Sampled evaluation remains the
+default, and existing training scripts remain backward compatible.
+
+```bash
+python -m rebuild_gpt.train_cli \
+  --corpus data/tiny_story.txt --steps 60 \
+  --eval-every 10 --validation-mode full \
+  --grad-clip 1.0 \
+  --warmup-steps 5 --lr-decay-steps 50 --min-lr 0.002 \
+  --output out/char_gpt.pt \
+  --best-output out/best_char_gpt.pt \
+  --history-file out/training_history.json \
+  --restore-best
+```
+
+Run `examples/75_gradient_clipping.py` through
+`examples/79_full_training_controls.py`, read
+`lessons/78_gradient_clipping.md` through
+`lessons/82_full_training_controls.md`, and run `python -m pytest`.
+
+**Caution:** Exhaustive scoring here means exhaustive next-token
+targets under a **chunked context reset policy**. It does not mean a
+token-by-token sliding-window score or a representative benchmark
+on a large language corpus. Better validation estimates do not
+guarantee coherent generated text on the tiny included story.

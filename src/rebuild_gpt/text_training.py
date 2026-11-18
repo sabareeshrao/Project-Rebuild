@@ -7,6 +7,7 @@ import torch
 
 from rebuild_gpt.best_model import BestValidationModel
 from rebuild_gpt.config import GPTConfig
+from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.schedule import cosine_warmup_lr
@@ -36,6 +37,7 @@ def train_char_gpt(
     warmup_steps: int = 0,
     lr_decay_steps: int | None = None,
     min_lr: float = 0.0,
+    validation_mode: str = "sampled",
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -74,6 +76,8 @@ def train_char_gpt(
             0, max_lr=learning_rate, min_lr=min_lr,
             warmup_steps=warmup_steps, decay_steps=lr_decay_steps,
         )
+    if validation_mode not in ("sampled", "full"):
+        raise ValueError("validation_mode must be sampled or full")
     if history is not None:
         history.clear()
 
@@ -99,14 +103,21 @@ def train_char_gpt(
 
     model.eval()
     with torch.no_grad():
-        before = model.loss(val_x, val_y).item()
+        before = (
+            full_corpus_loss(model, validation, block_size=block_size)
+            if validation_mode == "full" else model.loss(val_x, val_y).item()
+        )
     tracker = BestValidationModel() if (restore_best or best_checkpoint_path is not None) else None
 
     def record_evaluation(step: int) -> None:
-        scores = estimate_train_val_loss(
-            model, train, validation,
-            batch_size=batch_size, block_size=block_size,
-            eval_batches=eval_batches, seed=seed + 2,
+        scores = (
+            full_train_val_loss(model, train, validation, block_size=block_size)
+            if validation_mode == "full"
+            else estimate_train_val_loss(
+                model, train, validation,
+                batch_size=batch_size, block_size=block_size,
+                eval_batches=eval_batches, seed=seed + 2,
+            )
         )
         if history is not None:
             history.append({"step": step, **scores})
@@ -142,7 +153,10 @@ def train_char_gpt(
         tracker.restore(model)
     model.eval()
     with torch.no_grad():
-        after = model.loss(val_x, val_y).item()
+        after = (
+            full_corpus_loss(model, validation, block_size=block_size)
+            if validation_mode == "full" else model.loss(val_x, val_y).item()
+        )
     metrics = {
         "train_loss_last": last_loss,
         "validation_before": before,
