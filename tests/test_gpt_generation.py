@@ -87,3 +87,17 @@ def test_generation_fills_short_prompt_before_cropping():
     model.forward_nanogpt = record_context
     model.generate(torch.tensor([[0, 1, 2, 3, 4, 5, 6]]), 4)
     assert observed == [7, 8, 8, 8]
+
+
+def test_temperature_validation_happens_even_with_zero_generation_steps():
+    model = make_model()
+    with pytest.raises(ValueError, match="temperature"):
+        model.generate(torch.tensor([[1, 2]]), 0, temperature=0.0)
+
+
+def test_seeded_sampling_with_temperature_is_reproducible():
+    model = make_model()
+    x = torch.tensor([[0, 1]])
+    a = model.generate(x, 5, temperature=0.7, generator=torch.Generator().manual_seed(26))
+    b = model.generate(x, 5, temperature=0.7, generator=torch.Generator().manual_seed(26))
+    assert torch.equal(a, b)
