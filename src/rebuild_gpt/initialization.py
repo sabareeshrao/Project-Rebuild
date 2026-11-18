@@ -25,8 +25,8 @@ def initialize_gpt_weights(model: nn.Module, n_layer: int) -> None:
                     nn.init.normal_(module.weight, mean=0.0, std=residual_std if scale_residual else 0.02)
                     seen_weights.add(id(module.weight))
                 if isinstance(module, nn.Linear) and module.bias is not None:
-                    if module.bias is not None:
                     nn.init.zeros_(module.bias)
             elif isinstance(module, FeatureLayerNorm):
                 nn.init.ones_(module.weight)
-                nn.init.zeros_(module.bias)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)

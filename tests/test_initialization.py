@@ -43,3 +43,14 @@ def test_gpt_initialization_is_deterministic_for_seed():
     torch.manual_seed(123)
     second = GPTLanguageModel(cfg)
     assert all(torch.equal(a, b) for a, b in zip(first.parameters(), second.parameters()))
+
+
+def test_bias_free_fused_model_initialization_does_not_access_none():
+    cfg = GPTConfig(7, 4, 8, 2, 2, attention_impl="fused", bias=False)
+    model = GPTLanguageModel(cfg)
+    for module in model.modules():
+        if isinstance(module, torch.nn.Linear):
+            assert module.bias is None or torch.count_nonzero(module.bias) == 0
+        if module.__class__.__name__ == "FeatureLayerNorm":
+            assert module.bias is None
+    assert model(torch.tensor([[0, 1, 2]])).shape == (1, 3, 7)
