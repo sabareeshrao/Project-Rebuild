@@ -454,3 +454,38 @@ The reference tests skip when `NANOGPT_MODEL_PY` is absent; normal
 tests are fully offline. This does not imply real GPT-2 checkpoint
 compatibility. Current generation uses full-window recomputation,
 not KV caching or accelerated attention.
+
+## Text-to-text GPT inference (commits 071–075)
+
+A trained character-level GPT can now accept a **text prompt**, generate
+token IDs with temperature/top-k sampling, and decode them back into
+readable characters. We save the **exact ordered tokenizer vocabulary**
+alongside model weights and config in a single inference checkpoint,
+so token IDs remain meaningful after reloading.
+
+Train a small model on the included text, then generate text from a
+fresh process:
+
+```bash
+python examples/68_train_text_gpt.py --steps 60 --output tiny_story_gpt.pt
+python -m rebuild_gpt.text_cli \
+  --checkpoint tiny_story_gpt.pt --prompt "a" \
+  --new-tokens 80 --temperature 0.8 --top-k 5 --seed 13
+```
+
+Or run the full demonstration without saving a persistent checkpoint:
+
+```bash
+python examples/65_save_vocabulary.py
+python examples/66_generate_text.py
+python examples/67_text_checkpoint.py
+python examples/69_text_to_text.py
+python -m pytest
+```
+
+Read `lessons/68_save_vocabulary.md` through
+`lessons/72_text_inference_cli.md`. The tiny included corpus makes
+this an **educational example**, not a high-quality pretrained text
+generator. Unseen prompt characters are rejected rather than
+silently remapped. The combined checkpoint is for inference;
+optimizer and RNG resume state are covered in earlier lessons.
