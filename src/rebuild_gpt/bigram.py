@@ -3,6 +3,8 @@
 import torch
 from torch import nn
 
+from rebuild_gpt.probability import next_token_cross_entropy
+
 
 class BigramLanguageModel(nn.Module):
     """Predict the next-token logits using only the current token's ID."""
@@ -21,3 +23,7 @@ class BigramLanguageModel(nn.Module):
         if (token_ids < 0).any() or (token_ids >= self.vocab_size).any():
             raise ValueError("token ID outside vocabulary")
         return self.token_to_logits(token_ids)
+
+    def loss(self, token_ids: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Differentiable next-token cross-entropy, averaged across B and T."""
+        return next_token_cross_entropy(self(token_ids), targets)

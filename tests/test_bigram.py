@@ -32,3 +32,22 @@ def test_bigram_rejects_invalid_token_ids():
         model(torch.tensor([0, 1]))
     with pytest.raises(ValueError, match="outside vocabulary"):
         model(torch.tensor([[3]]))
+
+
+def test_bigram_loss_matches_reference_cross_entropy():
+    model = BigramLanguageModel(vocab_size=3)
+    x = torch.tensor([[0, 1], [2, 0]])
+    y = torch.tensor([[1, 2], [0, 1]])
+    expected = torch.nn.functional.cross_entropy(model(x).reshape(-1, 3), y.reshape(-1))
+    assert torch.allclose(model.loss(x, y), expected)
+
+
+def test_bigram_loss_creates_embedding_gradients():
+    model = BigramLanguageModel(vocab_size=3)
+    x = torch.tensor([[0, 1, 2]])
+    y = torch.tensor([[1, 2, 0]])
+    model.loss(x, y).backward()
+    grad = model.token_to_logits.weight.grad
+    assert grad is not None
+    assert torch.isfinite(grad).all()
+    assert grad.abs().sum() > 0
