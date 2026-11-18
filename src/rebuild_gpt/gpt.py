@@ -38,5 +38,27 @@ class GPTLanguageModel(nn.Module):
         )
         return self.head(self.final_norm(self.blocks(hidden)))
 
+    def forward_nanogpt(
+        self, token_ids: torch.Tensor, targets: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Mirror upstream GPT.forward's output contract without changing forward().
+
+        Inference returns only the final time position. Training with targets
+        returns full logits and cross-entropy ignoring target ID -1.
+        """
+        from torch.nn import functional as F
+
+        logits = self(token_ids)
+        if targets is None:
+            return logits[:, -1:, :], None
+        if targets.shape != token_ids.shape or targets.dtype != torch.long:
+            raise ValueError("targets must be torch.long with shape [batch, time]")
+        loss = F.cross_entropy(
+            logits.reshape(-1, logits.size(-1)),
+            targets.reshape(-1),
+            ignore_index=-1,
+        )
+        return logits, loss
+
     def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         return next_token_cross_entropy(self(inputs), targets)
