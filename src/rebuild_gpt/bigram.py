@@ -3,7 +3,7 @@
 import torch
 from torch import nn
 
-from rebuild_gpt.probability import next_token_cross_entropy
+from rebuild_gpt.probability import next_token_cross_entropy, stable_softmax
 
 
 class BigramLanguageModel(nn.Module):
@@ -27,3 +27,25 @@ class BigramLanguageModel(nn.Module):
     def loss(self, token_ids: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Differentiable next-token cross-entropy, averaged across B and T."""
         return next_token_cross_entropy(self(token_ids), targets)
+
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt: torch.Tensor,
+        num_new_tokens: int,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Sample new token IDs autoregressively, starting after each prompt."""
+        if num_new_tokens < 0:
+            raise ValueError("num_new_tokens must be nonnegative")
+        self.forward(prompt)  # Validate shape, dtype, and token IDs, even for zero steps.
+        result = prompt
+        for _ in range(num_new_tokens):
+            last_logits = self(result[:, -1:])[:, -1, :]
+            probabilities = stable_softmax(last_logits)
+            next_token = torch.multinomial(
+                probabilities, num_samples=1, generator=generator
+            )
+            result = torch.cat((result, next_token), dim=1)
+        return result

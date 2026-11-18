@@ -51,3 +51,43 @@ def test_bigram_loss_creates_embedding_gradients():
     assert grad is not None
     assert torch.isfinite(grad).all()
     assert grad.abs().sum() > 0
+
+
+def test_generation_preserves_prompt_and_extends_both_rows():
+    torch.manual_seed(4)
+    model = BigramLanguageModel(vocab_size=3)
+    prompt = torch.tensor([[0, 1], [2, 0]])
+    generated = model.generate(prompt, num_new_tokens=5, generator=torch.Generator().manual_seed(8))
+    assert generated.shape == (2, 7)
+    assert torch.equal(generated[:, :2], prompt)
+    assert ((0 <= generated) & (generated < 3)).all()
+
+
+def test_generation_is_reproducible_for_same_seed():
+    model = BigramLanguageModel(vocab_size=4)
+    prompt = torch.tensor([[0, 1]])
+    a = model.generate(prompt, 8, generator=torch.Generator().manual_seed(10))
+    b = model.generate(prompt, 8, generator=torch.Generator().manual_seed(10))
+    assert torch.equal(a, b)
+
+
+def test_generation_depends_only_on_last_token_for_bigram():
+    model = BigramLanguageModel(vocab_size=4)
+    prompts = torch.tensor([[0, 2], [1, 2]])
+    output = model.generate(prompts[:1], 6, generator=torch.Generator().manual_seed(5))
+    other = model.generate(prompts[1:], 6, generator=torch.Generator().manual_seed(5))
+    assert torch.equal(output[0, 2:], other[0, 2:])
+
+
+def test_generation_rejects_invalid_prompt_or_negative_length():
+    model = BigramLanguageModel(vocab_size=3)
+    with pytest.raises(ValueError, match="nonnegative"):
+        model.generate(torch.tensor([[0]]), -1)
+    with pytest.raises(ValueError, match="non-empty"):
+        model.generate(torch.tensor([], dtype=torch.long), 1)
+
+
+def test_generation_does_not_track_gradients():
+    model = BigramLanguageModel(vocab_size=3)
+    out = model.generate(torch.tensor([[0]]), 3)
+    assert not out.requires_grad
