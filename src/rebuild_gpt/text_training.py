@@ -14,6 +14,7 @@ from rebuild_gpt.optimizers import configure_adamw
 from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
+from rebuild_gpt.text_resume import load_text_training_state, save_text_training_state
 from rebuild_gpt.tokenizer import CharTokenizer
 from rebuild_gpt.training import train_accumulated_step, train_step
 
@@ -43,6 +44,8 @@ def train_char_gpt(
     weight_decay: float = 0.1,
     adam_betas: tuple[float, float] = (0.9, 0.95),
     gradient_accumulation_steps: int = 1,
+    resume_from: str | Path | None = None,
+    training_state_path: str | Path | None = None,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -103,6 +106,26 @@ def train_char_gpt(
     if len(train) <= block_size or len(validation) <= block_size:
         raise ValueError("Corpus is too short for block_size in train/validation")
 
+    # The total optimizer-step target is intentionally omitted from these
+    # controls, so training can continue from step N to a larger step M.
+    controls = {
+        "batch_size": batch_size,
+        "learning_rate": float(learning_rate),
+        "seed": seed,
+        "eval_interval": eval_interval,
+        "eval_batches": eval_batches,
+        "max_grad_norm": max_grad_norm,
+        "warmup_steps": warmup_steps,
+        "lr_decay_steps": lr_decay_steps,
+        "min_lr": min_lr,
+        "validation_mode": validation_mode,
+        "grouped_adamw": grouped_adamw,
+        "weight_decay": weight_decay if grouped_adamw else None,
+        "adam_betas": list(adam_betas) if grouped_adamw else None,
+        "gradient_accumulation_steps": gradient_accumulation_steps,
+        "track_best": bool(restore_best or best_checkpoint_path is not None),
+    }
+
     torch.manual_seed(seed)
     model = GPTLanguageModel(config)
     optimizer = (
@@ -118,13 +141,37 @@ def train_char_gpt(
         generator=torch.Generator().manual_seed(seed + 1),
     )
 
-    model.eval()
-    with torch.no_grad():
-        before = (
-            full_corpus_loss(model, validation, block_size=block_size)
-            if validation_mode == "full" else model.loss(val_x, val_y).item()
-        )
     tracker = BestValidationModel() if (restore_best or best_checkpoint_path is not None) else None
+    saved = None
+    start_step = 0
+    if resume_from is not None:
+        saved = load_text_training_state(
+            resume_from, model=model, tokenizer=tokenizer,
+            corpus_path=corpus_path, controls=controls,
+        )
+        start_step = saved["step"]
+        if steps <= start_step:
+            raise ValueError("steps must exceed the resumed checkpoint step")
+        model.load_state_dict(saved["model"], strict=True)
+        optimizer.load_state_dict(saved["optimizer"])
+        training_rng.set_state(saved["batch_generator_state"])
+        torch.set_rng_state(saved["cpu_rng_state"])
+        if tracker is not None:
+            if saved["best_state"] is None:
+                raise ValueError("Checkpoint is missing best-model tracking state")
+            tracker.load_state_dict(saved["best_state"])
+        if history is not None:
+            history.extend(saved["history"])
+
+    if saved is None:
+        model.eval()
+        with torch.no_grad():
+            before = (
+                full_corpus_loss(model, validation, block_size=block_size)
+                if validation_mode == "full" else model.loss(val_x, val_y).item()
+            )
+    else:
+        before = saved["validation_before"]
 
     def record_evaluation(step: int) -> None:
         scores = (
@@ -142,12 +189,14 @@ def train_char_gpt(
             if best_checkpoint_path is not None:
                 save_text_checkpoint(model, tokenizer, best_checkpoint_path)
 
-    if eval_interval is not None:
+    if eval_interval is not None and saved is None:
         record_evaluation(0)
 
-    last_loss = float("nan")
-    last_learning_rate = float(learning_rate)
-    for step in range(1, steps + 1):
+    last_loss = saved["last_loss"] if saved is not None else float("nan")
+    last_learning_rate = (
+        saved["last_learning_rate"] if saved is not None else float(learning_rate)
+    )
+    for step in range(start_step + 1, steps + 1):
         microbatches = [
             sample_batch(
                 train, batch_size=batch_size, block_size=block_size,
@@ -173,6 +222,20 @@ def train_char_gpt(
             )
         if eval_interval is not None and (step % eval_interval == 0 or step == steps):
             record_evaluation(step)
+
+    # Save the most recent optimizer weights BEFORE optionally switching to
+    # best-validation weights for inference. Otherwise resume would diverge.
+    if training_state_path is not None:
+        save_text_training_state(
+            training_state_path,
+            model=model, tokenizer=tokenizer, optimizer=optimizer,
+            corpus_path=corpus_path, controls=controls, step=steps,
+            batch_generator=training_rng,
+            history=history if history is not None else [],
+            validation_before=before, last_loss=last_loss,
+            last_learning_rate=last_learning_rate,
+            best_state=tracker.state_dict() if tracker is not None else None,
+        )
 
     if restore_best:
         assert tracker is not None
