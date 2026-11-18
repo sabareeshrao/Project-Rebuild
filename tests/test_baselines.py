@@ -19,3 +19,21 @@ def test_uniform_baseline_rejects_bad_inputs():
         uniform_logits(torch.empty((0, 2), dtype=torch.long), vocab_size=3)
     with pytest.raises(ValueError, match="positive"):
         uniform_logits(torch.tensor([[0, 1]]), vocab_size=0)
+
+
+from rebuild_gpt.baselines import unigram_probabilities
+
+
+def test_unigram_probabilities_use_frequency_and_smoothing():
+    probs = unigram_probabilities(torch.tensor([0, 0, 1]), vocab_size=3)
+    assert torch.allclose(probs, torch.tensor([3 / 6, 2 / 6, 1 / 6]))
+    assert torch.isclose(probs.sum(), torch.tensor(1.0))
+
+
+def test_unigram_probabilities_reject_invalid_tokens():
+    with pytest.raises(ValueError, match="outside"):
+        unigram_probabilities(torch.tensor([0, 3]), vocab_size=3)
+    with pytest.raises(ValueError, match="outside"):
+        unigram_probabilities(torch.tensor([-1, 2]), vocab_size=3)
+    with pytest.raises(ValueError, match="non-empty"):
+        unigram_probabilities(torch.tensor([], dtype=torch.long), vocab_size=3)
