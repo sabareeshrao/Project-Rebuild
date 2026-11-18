@@ -33,3 +33,14 @@ def autocast_context(device: torch.device, precision: str = "fp32"):
     if dtype is None:
         return nullcontext()
     return torch.autocast(device_type=device.type, dtype=dtype)
+
+
+def make_grad_scaler(
+    device: torch.device, precision: str = "fp32"
+) -> torch.cuda.amp.GradScaler | None:
+    """Use dynamic loss scaling only for CUDA FP16.
+
+    torch.cuda.amp.GradScaler works with the project's minimum torch>=2.2.
+    """
+    resolve_precision(device, precision)
+    return torch.cuda.amp.GradScaler() if precision == "fp16" else None
