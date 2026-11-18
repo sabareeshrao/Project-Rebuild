@@ -412,3 +412,45 @@ is absent. Read `lessons/58_optional_bias.md` through
 **Scope:** Reference tests use tiny CPU models with transferred
 synthetic weights, not downloaded GPT-2 checkpoint weights. Passing
 these tests does not establish full checkpoint compatibility.
+
+## Autoregressive generation and sampling (commits 066–070)
+
+The stacked `GPTLanguageModel` can now generate token IDs using
+the same basic inference sequence as nanoGPT: take last-position
+logits, apply temperature, optionally filter top-k candidates,
+softmax, sample one ID, and append it to the growing output. When
+the context exceeds `block_size`, only the newest `block_size`
+tokens are passed through the model; all generated tokens remain
+in the returned tensor.
+
+```python
+model.eval()
+output_ids = model.generate(
+    prompt_ids, max_new_tokens=30, temperature=0.8, top_k=10,
+)
+```
+
+Run the new exercises:
+
+```bash
+python examples/60_generate_gpt.py
+python examples/61_crop_generation_context.py
+python examples/62_sampling_temperature.py
+python examples/63_sampling_topk.py
+python -m pytest
+```
+
+Read `lessons/63_gpt_generation.md` through
+`lessons/67_upstream_generation_parity.md`. An **opt-in**
+reference test compares sampled tokens against an independently
+obtained, trusted original nanoGPT `model.py`:
+
+```bash
+NANOGPT_MODEL_PY=original_nanogpt_model.py python -m pytest tests/test_actual_nanogpt_generation.py -v
+python examples/64_compare_upstream_sampling.py --upstream-model original_nanogpt_model.py
+```
+
+The reference tests skip when `NANOGPT_MODEL_PY` is absent; normal
+tests are fully offline. This does not imply real GPT-2 checkpoint
+compatibility. Current generation uses full-window recomputation,
+not KV caching or accelerated attention.
