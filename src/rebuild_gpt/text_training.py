@@ -9,6 +9,7 @@ from rebuild_gpt.best_model import BestValidationModel
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.gpt import GPTLanguageModel
+from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.tokenizer import CharTokenizer
@@ -31,6 +32,10 @@ def train_char_gpt(
     history: list[dict[str, float | int]] | None = None,
     restore_best: bool = False,
     best_checkpoint_path: str | Path | None = None,
+    max_grad_norm: float | None = None,
+    warmup_steps: int = 0,
+    lr_decay_steps: int | None = None,
+    min_lr: float = 0.0,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -55,6 +60,20 @@ def train_char_gpt(
         raise ValueError("Best-model tracking requires eval_interval")
     if type(restore_best) is not bool:
         raise ValueError("restore_best must be boolean")
+    if max_grad_norm is not None and (
+        isinstance(max_grad_norm, bool)
+        or not isinstance(max_grad_norm, (float, int))
+        or not math.isfinite(max_grad_norm) or max_grad_norm <= 0
+    ):
+        raise ValueError("max_grad_norm must be finite and positive or None")
+    if lr_decay_steps is None:
+        if warmup_steps != 0 or min_lr != 0.0:
+            raise ValueError("lr_decay_steps required for warmup_steps or min_lr")
+    else:
+        cosine_warmup_lr(
+            0, max_lr=learning_rate, min_lr=min_lr,
+            warmup_steps=warmup_steps, decay_steps=lr_decay_steps,
+        )
     if history is not None:
         history.clear()
 
@@ -99,12 +118,22 @@ def train_char_gpt(
         record_evaluation(0)
 
     last_loss = float("nan")
+    last_learning_rate = float(learning_rate)
     for step in range(1, steps + 1):
         inputs, targets = sample_batch(
             train, batch_size=batch_size, block_size=block_size,
             generator=training_rng,
         )
-        last_loss = train_step(model, optimizer, inputs, targets)
+        if lr_decay_steps is not None:
+            last_learning_rate = cosine_warmup_lr(
+                step - 1, max_lr=learning_rate, min_lr=min_lr,
+                warmup_steps=warmup_steps, decay_steps=lr_decay_steps,
+            )
+            for group in optimizer.param_groups:
+                group["lr"] = last_learning_rate
+        last_loss = train_step(
+            model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
+        )
         if eval_interval is not None and (step % eval_interval == 0 or step == steps):
             record_evaluation(step)
 
@@ -122,4 +151,6 @@ def train_char_gpt(
     if tracker is not None:
         metrics["best_validation_loss"] = tracker.best_loss
         metrics["best_step"] = float(tracker.best_step)
+    if lr_decay_steps is not None:
+        metrics["learning_rate_last"] = last_learning_rate
     return model, tokenizer, metrics
