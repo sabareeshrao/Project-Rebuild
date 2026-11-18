@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Computation dtype; fp16 needs CUDA and uses GradScaler")
     parser.add_argument("--attention-impl", choices=("fused", "sdpa"), default="fused",
                         help="Manual fused attention or PyTorch SDPA (default: fused)")
+    parser.add_argument("--activation-checkpointing", action="store_true",
+                        help="Recompute transformer block activations during backward")
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-embd", type=int, default=16)
@@ -82,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
             device=args.device,
             precision=args.precision,
             attention_impl=args.attention_impl,
+            activation_checkpointing=args.activation_checkpointing,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -99,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         "training_state": args.training_state,
         "training_controls": {
             "precision": args.precision,
+            "activation_checkpointing": args.activation_checkpointing,
             "grad_clip": args.grad_clip,
             "warmup_steps": args.warmup_steps,
             "lr_decay_steps": args.lr_decay_steps,

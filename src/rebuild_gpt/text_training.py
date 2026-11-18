@@ -51,6 +51,7 @@ def train_char_gpt(
     device: str = "cpu",
     precision: str = "fp32",
     attention_impl: str = "fused",
+    activation_checkpointing: bool = False,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -99,6 +100,8 @@ def train_char_gpt(
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
     if attention_impl not in ("fused", "sdpa"):
         raise ValueError("attention_impl must be fused or sdpa for text training")
+    if type(activation_checkpointing) is not bool:
+        raise ValueError("activation_checkpointing must be boolean")
     compute_device = resolve_device(device)
     resolve_precision(compute_device, precision)
     if history is not None:
@@ -141,9 +144,14 @@ def train_char_gpt(
         controls["device"] = str(compute_device)
     if precision != "fp32":
         controls["precision"] = precision
+    # Preserve compatibility with previous default-off training states,
+    # but reject a resume that changes the recomputation policy.
+    if activation_checkpointing:
+        controls["activation_checkpointing"] = True
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
+    model.blocks.set_activation_checkpointing(activation_checkpointing)
     optimizer = (
         configure_adamw(
             model, learning_rate=learning_rate, weight_decay=weight_decay,
