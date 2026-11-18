@@ -22,9 +22,9 @@ class GPTLanguageModel(nn.Module):
         self.input_dropout = nn.Dropout(config.dropout)
         self.blocks = TransformerStack(
             config.n_embd, config.n_head, config.n_layer, config.dropout,
-            attention_impl=config.attention_impl
+            attention_impl=config.attention_impl, bias=config.bias
         )
-        self.final_norm = FeatureLayerNorm(config.n_embd)
+        self.final_norm = FeatureLayerNorm(config.n_embd, bias=config.bias)
         self.head = VocabularyProjection(config.n_embd, config.vocab_size)
         if config.tie_embeddings:
             # Both paths use one Parameter; gradients and optimizer updates are shared.

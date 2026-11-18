@@ -14,6 +14,7 @@ class GPTConfig:
     dropout: float = 0.0
     tie_embeddings: bool = True
     attention_impl: str = "educational"
+    bias: bool = True
 
     def __post_init__(self) -> None:
         for name in ("vocab_size", "block_size", "n_embd", "n_head", "n_layer"):
@@ -22,6 +23,10 @@ class GPTConfig:
                 raise ValueError(f"{name} must be a positive integer")
         if type(self.tie_embeddings) is not bool:
             raise ValueError("tie_embeddings must be a boolean")
+        if type(self.bias) is not bool:
+            raise ValueError("bias must be a boolean")
+        if not self.bias and self.attention_impl != "fused":
+            raise ValueError("bias=False requires fused attention")
         if self.attention_impl not in ("educational", "fused"):
             raise ValueError("attention_impl must be educational or fused")
         if self.n_embd % self.n_head != 0:

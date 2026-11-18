@@ -9,12 +9,12 @@ from rebuild_gpt.qkv import FusedQKVProjection
 class FusedCausalSelfAttention(nn.Module):
     """Use [B,H,T,D] batched attention instead of independent Python heads."""
 
-    def __init__(self, n_embd: int, n_head: int, dropout: float = 0.0) -> None:
+    def __init__(self, n_embd: int, n_head: int, dropout: float = 0.0, *, bias: bool = True) -> None:
         super().__init__()
         if not 0 <= dropout <= 1:
             raise ValueError("dropout must be between 0 and 1")
-        self.qkv = FusedQKVProjection(n_embd, n_head)
-        self.c_proj = nn.Linear(n_embd, n_embd)
+        self.qkv = FusedQKVProjection(n_embd, n_head, bias=bias)
+        self.c_proj = nn.Linear(n_embd, n_embd, bias=bias)
         self.attn_dropout = nn.Dropout(dropout)
         self.resid_dropout = nn.Dropout(dropout)
 
