@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from rebuild_gpt.embeddings import TokenEmbedding
+from rebuild_gpt.embeddings import TokenEmbedding, VocabularyProjection
 
 
 def test_tokens_become_vectors_without_losing_batch_time():
@@ -34,3 +34,21 @@ def test_token_embeddings_reject_out_of_range_ids():
     model = TokenEmbedding(5, 2)
     with pytest.raises(ValueError, match="outside"):
         model(torch.tensor([[5]]))
+
+
+def test_vocab_projection_produces_logits_with_expected_shape():
+    head = VocabularyProjection(n_embd=3, vocab_size=5)
+    vectors = torch.randn(2, 4, 3, requires_grad=True)
+    logits = head(vectors)
+    assert logits.shape == (2, 4, 5)
+    assert isinstance(head.linear, nn.Linear)
+    assert head.linear.bias is None
+    logits.sum().backward()
+    assert vectors.grad is not None
+    assert head.linear.weight.grad is not None
+
+
+def test_vocab_projection_rejects_wrong_feature_count():
+    head = VocabularyProjection(3, 5)
+    with pytest.raises(ValueError, match="n_embd"):
+        head(torch.zeros(2, 4, 2))
