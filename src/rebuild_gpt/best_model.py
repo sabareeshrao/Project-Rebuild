@@ -40,3 +40,34 @@ class BestValidationModel:
         if self._state is None:
             raise ValueError("No best model has been recorded")
         model.load_state_dict(self._state, strict=True)
+
+    def state_dict(self) -> dict:
+        """Copy best-score metadata and tensors for an interrupted training run."""
+        return {
+            "best_loss": self.best_loss,
+            "best_step": self.best_step,
+            "model_state": None if self._state is None else {
+                name: tensor.detach().cpu().clone()
+                for name, tensor in self._state.items()
+            },
+        }
+
+    def load_state_dict(self, saved: dict) -> None:
+        """Restore independent CPU snapshots without aliasing checkpoint tensors."""
+        if not isinstance(saved, dict):
+            raise ValueError("best-model snapshot must be a dict")
+        score, step, state = (
+            saved.get("best_loss"), saved.get("best_step"), saved.get("model_state")
+        )
+        if step is None:
+            if score != math.inf or state is not None:
+                raise ValueError("uninitialized best-model snapshot is inconsistent")
+        elif (type(step) is not int or step < 0 or isinstance(score, bool)
+              or not isinstance(score, (float, int)) or not math.isfinite(score)
+              or score < 0 or not isinstance(state, dict) or not state):
+            raise ValueError("best-model snapshot is invalid")
+        self.best_loss = float(score)
+        self.best_step = step
+        self._state = None if state is None else {
+            name: tensor.detach().cpu().clone() for name, tensor in state.items()
+        }
