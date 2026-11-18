@@ -20,7 +20,7 @@ def normalize_features(hidden: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
 class FeatureLayerNorm(nn.Module):
     """Normalize C features with learned per-feature scale and bias."""
 
-    def __init__(self, n_embd: int, eps: float = 1e-5) -> None:
+    def __init__(self, n_embd: int, eps: float = 1e-5, *, bias: bool = True) -> None:
         super().__init__()
         if n_embd < 1:
             raise ValueError("n_embd must be positive")
@@ -29,7 +29,7 @@ class FeatureLayerNorm(nn.Module):
         self.n_embd = n_embd
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(n_embd))
-        self.bias = nn.Parameter(torch.zeros(n_embd))
+        self.bias = nn.Parameter(torch.zeros(n_embd)) if bias else None
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         if hidden.ndim != 3 or hidden.size(-1) != self.n_embd:
