@@ -717,3 +717,33 @@ the inference benchmark measures only forward-pass latency. Both use
 warmup and, on CUDA, synchronization. Neither benchmark assumes that
 SDPA is always faster. See `lessons/108_ci_regression.md` through
 `lessons/112_ci_quality_gates.md` for the corresponding lessons.
+
+## Memory and profiling (commits 116–120)
+
+These lessons distinguish **estimated model storage**, **measured CUDA
+allocator peaks**, and **latency or operator-level profiles**. A CPU-only
+machine can run all educational examples except measured CUDA memory.
+
+```bash
+python -m pytest tests/test_memory.py tests/test_cuda_memory.py \
+  tests/test_memory_comparison.py tests/test_context_sweep.py \
+  tests/test_torch_profiler.py -q
+
+# Model/AdamW persistent tensor estimate, optionally measure CUDA peak
+python examples/90_memory_comparison.py --device cpu
+
+# Time multiple context lengths and save CSV
+python examples/91_context_sweep.py --lengths 4,8,16 --csv out/context_sweep.csv
+
+# Export an operator-level timeline for Chrome trace viewers
+python examples/92_torch_profiler.py --device cpu \
+  --output out/profiles/tiny_gpt.json
+```
+
+For a CUDA machine, use `--device cuda` on supported examples.
+Profiler instrumentation adds overhead; do not use profiled timings as
+unbiased throughput benchmarks. Traces may contain operation shapes,
+names and workload metadata, so review them before sharing.
+
+Read `lessons/113_memory_budget.md` through
+`lessons/117_operator_profiler.md` in order.
