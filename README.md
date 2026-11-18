@@ -211,3 +211,35 @@ requires earlier-token context to disambiguate next-token targets.
 GPT-2 transformer. We still need multiple heads, layer normalization,
 feed-forward networks, stacked blocks, training refinements, and
 compatibility checks with original nanoGPT.
+
+## Multi-head attention (commits 036–040)
+
+We now concatenate **multiple independent causal self-attention heads**,
+learn a projection back into the hidden width, optionally apply
+training-only **output dropout**, and combine the result with token +
+position embeddings through a residual connection.
+
+```text
+hidden [B,T,C] -> H heads [B,T,C/H] -> concat [B,T,C]
+              -> projection [B,T,C] -> dropout -> residual
+              -> vocabulary logits [B,T,V] -> next-token loss
+```
+
+New lessons and runnable exercises:
+
+```bash
+python examples/33_parallel_heads.py
+python examples/34_multihead_projection.py
+python examples/35_attention_dropout.py
+python examples/36_multihead_language_model.py
+python examples/37_train_multihead_model.py
+python -m pytest
+```
+
+Read `lessons/33_parallel_heads.md` through
+`lessons/37_train_multihead_model.md`. The final exercise trains on
+two sequences with identical last input tokens but different required
+next-token predictions, confirming the model can use earlier context.
+
+**Not yet a GPT transformer block:** LayerNorm, a feed-forward MLP,
+stacked blocks and efficient fused attention remain to be built.
