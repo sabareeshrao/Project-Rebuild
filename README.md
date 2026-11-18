@@ -489,3 +489,46 @@ this an **educational example**, not a high-quality pretrained text
 generator. Unseen prompt characters are rejected rather than
 silently remapped. The combined checkpoint is for inference;
 optimizer and RNG resume state are covered in earlier lessons.
+
+## Reproducible training and validation (commits 076–080)
+
+We now estimate training/validation loss on **repeatably sampled**
+held-out batches, monitor loss at regular steps, retain the lowest
+validation-loss model, and save it alongside the tokenizer.
+
+Run a training experiment from the repository root:
+
+```bash
+python -m rebuild_gpt.train_cli \
+  --corpus data/tiny_story.txt --steps 60 \
+  --eval-every 10 --eval-batches 4 --seed 7 \
+  --output out/char_gpt.pt \
+  --best-output out/best_char_gpt.pt \
+  --history-file out/training_history.json
+
+python -m rebuild_gpt.text_cli \
+  --checkpoint out/best_char_gpt.pt --prompt "a" \
+  --new-tokens 80 --temperature 0.8 --top-k 5 --seed 13
+```
+
+The JSON log records config, seed and per-step training/validation
+loss estimates. `--restore-best` puts the best observed weights in
+`--output` as well as `--best-output`. Both checkpoint files contain
+the model's exact character vocabulary for inference.
+
+Follow `lessons/73_repeatable_evaluation.md` through
+`lessons/77_reproducible_training_cli.md`, or run:
+
+```bash
+python examples/70_evaluate_splits.py
+python examples/71_training_history.py
+python examples/72_best_model_snapshot.py
+python examples/73_restore_best_text_gpt.py
+python examples/74_monitored_training.py
+python -m pytest
+```
+
+**Limitation:** Reused seeded mini-batches reduce comparison noise,
+but they are not a complete validation-set evaluation. The included
+tiny story is educational; better held-out loss does not establish
+useful or coherent language generation.

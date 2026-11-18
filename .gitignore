@@ -8,3 +8,4 @@ dist/
 data/**/*.bin
 out/
 wandb/
+*.pt
