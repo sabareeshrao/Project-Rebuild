@@ -602,3 +602,25 @@ Run `examples/80_gradient_accumulation.py` through
 single-process educational CPU workflow without mixed precision,
 distributed data parallelism, or complete optimizer checkpoint
 resume support for grouped optimizer configurations.
+
+## Resumable CPU text training (commits 091–095)
+
+The character-GPT trainer now distinguishes inference checkpoints from
+**training-state** checkpoints, including optimizer moments, current model
+weights, batch/CPU RNG states, validation progress, and a corpus fingerprint.
+
+```bash
+# Save state after two optimizer updates
+python -m rebuild_gpt.train_cli --steps 2 --eval-every 2 \
+  --training-state out/train_state.pt
+
+# Resume to step four using identical hyperparameters
+python -m rebuild_gpt.train_cli --steps 4 --eval-every 2 \
+  --resume-from out/train_state.pt --training-state out/train_state.pt
+```
+
+`--steps` is always the **total** optimizer-update target. Resuming
+with different data, tokenizer, model configuration or training controls
+fails rather than silently starting a different experiment. Keep
+training-state files trusted: they are loaded via
+`torch.load(..., weights_only=True)`.

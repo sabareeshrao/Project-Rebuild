@@ -36,12 +36,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--best-output", default="out/best_char_gpt.pt", help="Lowest validation-loss model")
     parser.add_argument("--history-file", default="out/training_history.json")
     parser.add_argument("--restore-best", action="store_true", help="Return best weights instead of final weights")
+    parser.add_argument("--training-state", default=None,
+                        help="Save optimizer, RNG, vocabulary and training progress")
+    parser.add_argument("--resume-from", default=None,
+                        help="Continue from a trusted training-state checkpoint; --steps is the total target")
     args = parser.parse_args(argv)
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
+    if args.training_state is not None:
+        paths.append(Path(args.training_state).resolve())
     if len(set(paths)) != len(paths):
-        parser.error("--output, --best-output, and --history-file must be distinct")
+        parser.error("output, best, history, and training-state paths must be distinct")
+    if args.resume_from is not None and Path(args.resume_from).resolve() in paths[:3]:
+        parser.error("--resume-from cannot be an inference or history output path")
 
     history: list[dict[str, float | int]] = []
     try:
@@ -63,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
             weight_decay=args.weight_decay,
             adam_betas=(args.adam_beta1, args.adam_beta2),
             gradient_accumulation_steps=args.gradient_accumulation_steps,
+            resume_from=args.resume_from,
+            training_state_path=args.training_state,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -73,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
         "seed": args.seed,
         "model_config": asdict(model.config),
         "restored_best": args.restore_best,
+        "target_steps": args.steps,
+        "resumed_from": args.resume_from,
+        "training_state": args.training_state,
         "training_controls": {
             "grad_clip": args.grad_clip,
             "warmup_steps": args.warmup_steps,
@@ -99,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     print("model checkpoint:", args.output)
     print("best checkpoint:", args.best_output)
     print("history:", args.history_file)
+    if args.training_state is not None:
+        print("resumable training state:", args.training_state)
     return 0
 
 
