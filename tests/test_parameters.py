@@ -10,7 +10,7 @@ def test_model_parameter_count_matches_architecture_formula():
     config = GPTConfig(vocab_size=5, block_size=4, n_embd=8, n_head=2, n_layer=2)
     model = GPTLanguageModel(config)
     c, v, t, layers = config.n_embd, config.vocab_size, config.block_size, config.n_layer
-    expected = 2 * v * c + t * c + 2 * c + layers * (12 * c * c + 10 * c)
+    expected = v * c + t * c + 2 * c + layers * (12 * c * c + 10 * c)
     assert count_parameters(model) == expected
     assert count_parameters(model) == sum(p.numel() for p in model.parameters())
 
@@ -28,3 +28,26 @@ def test_parameter_count_can_exclude_frozen_weights():
     model.bias.requires_grad_(False)
     assert count_parameters(model) == 6
     assert count_parameters(model, trainable_only=False) == 8
+
+
+def test_tied_parameters_use_one_embedding_matrix():
+    config = GPTConfig(7, 4, 8, 2, 2)
+    model = GPTLanguageModel(config)
+    assert model.tokens.lookup.weight is model.head.linear.weight
+    assert count_parameters(model) == sum(p.numel() for p in model.parameters())
+
+
+def test_untied_parameters_still_supported_for_lessons():
+    tied = GPTLanguageModel(GPTConfig(7, 4, 8, 2, 2))
+    untied = GPTLanguageModel(GPTConfig(7, 4, 8, 2, 2, tie_embeddings=False))
+    assert untied.tokens.lookup.weight is not untied.head.linear.weight
+    assert count_parameters(untied) - count_parameters(tied) == 7 * 8
+
+
+def test_weight_tying_gradients_reach_shared_parameter():
+    model = GPTLanguageModel(GPTConfig(5, 3, 8, 2, 1))
+    tokens = torch.tensor([[0, 1, 2]])
+    targets = torch.tensor([[1, 2, 3]])
+    model.loss(tokens, targets).backward()
+    assert model.tokens.lookup.weight.grad is model.head.linear.weight.grad
+    assert torch.isfinite(model.tokens.lookup.weight.grad).all()

@@ -29,3 +29,9 @@ def test_config_is_immutable():
     config = GPTConfig(10, 4, 8, 2, 2)
     with pytest.raises(FrozenInstanceError):
         config.n_layer = 4
+
+
+def test_tying_flag_must_be_boolean():
+    assert GPTConfig(10, 4, 8, 2, 2).tie_embeddings is True
+    with pytest.raises(ValueError, match="tie_embeddings"):
+        GPTConfig(10, 4, 8, 2, 2, tie_embeddings=1)

@@ -24,6 +24,9 @@ class GPTLanguageModel(nn.Module):
         )
         self.final_norm = FeatureLayerNorm(config.n_embd)
         self.head = VocabularyProjection(config.n_embd, config.vocab_size)
+        if config.tie_embeddings:
+            # Both paths use one Parameter; gradients and optimizer updates are shared.
+            self.head.linear.weight = self.tokens.lookup.weight
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         hidden = self.tokens(token_ids)

@@ -12,12 +12,15 @@ class GPTConfig:
     n_head: int
     n_layer: int
     dropout: float = 0.0
+    tie_embeddings: bool = True
 
     def __post_init__(self) -> None:
         for name in ("vocab_size", "block_size", "n_embd", "n_head", "n_layer"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if type(self.tie_embeddings) is not bool:
+            raise ValueError("tie_embeddings must be a boolean")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         if not isinstance(self.dropout, (int, float)) or not math.isfinite(self.dropout) or not 0.0 <= self.dropout <= 1.0:
