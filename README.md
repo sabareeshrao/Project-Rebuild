@@ -699,3 +699,21 @@ sequence length and warmup; speedups are not guaranteed.
 Lessons: `103_sdpa_attention.md` through `107_sdpa_benchmark.md`.
 GitHub Actions now runs CPU tests; GPU coverage still needs a runner
 with CUDA hardware.
+
+## Benchmarking and CI checks (commits 111–115)
+
+GitHub Actions verifies Python syntax and runs the full CPU pytest suite.
+When tests fail, a JUnit XML report is attached to the workflow run.
+
+```bash
+python -m compileall -q src tests examples
+python -m pytest -q
+python examples/88_attention_benchmark.py --iterations 5
+python examples/89_training_benchmark.py --iterations 5
+```
+
+The training benchmark includes forward, backward and optimizer steps;
+the inference benchmark measures only forward-pass latency. Both use
+warmup and, on CUDA, synchronization. Neither benchmark assumes that
+SDPA is always faster. See `lessons/108_ci_regression.md` through
+`lessons/112_ci_quality_gates.md` for the corresponding lessons.
