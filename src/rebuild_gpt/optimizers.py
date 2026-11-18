@@ -17,7 +17,7 @@ def configure_adamw(
 ) -> torch.optim.AdamW:
     """Decay 2D+ trainable weights, but exempt 1D biases and LayerNorm weights.
 
-    Parameters are enumerated once via named_parameters(), so tied token/output
+    Parameters are enumerated once via model.parameters(), so tied token/output
     embeddings are not accidentally inserted into the optimizer twice.
     """
     if (

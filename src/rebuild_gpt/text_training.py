@@ -10,6 +10,7 @@ from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.gpt import GPTLanguageModel
+from rebuild_gpt.optimizers import configure_adamw
 from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
@@ -38,6 +39,9 @@ def train_char_gpt(
     lr_decay_steps: int | None = None,
     min_lr: float = 0.0,
     validation_mode: str = "sampled",
+    grouped_adamw: bool = False,
+    weight_decay: float = 0.1,
+    adam_betas: tuple[float, float] = (0.9, 0.95),
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -78,6 +82,10 @@ def train_char_gpt(
         )
     if validation_mode not in ("sampled", "full"):
         raise ValueError("validation_mode must be sampled or full")
+    if type(grouped_adamw) is not bool:
+        raise ValueError("grouped_adamw must be boolean")
+    if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
+        raise ValueError("weight_decay and adam_betas requires grouped_adamw")
     if history is not None:
         history.clear()
 
@@ -94,7 +102,13 @@ def train_char_gpt(
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    optimizer = (
+        configure_adamw(
+            model, learning_rate=learning_rate, weight_decay=weight_decay,
+            betas=adam_betas, device_type="cpu",
+        )
+        if grouped_adamw else torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    )
     training_rng = torch.Generator().manual_seed(seed)
     val_x, val_y = sample_batch(
         validation, batch_size=batch_size, block_size=block_size,
@@ -167,4 +181,6 @@ def train_char_gpt(
         metrics["best_step"] = float(tracker.best_step)
     if lr_decay_steps is not None:
         metrics["learning_rate_last"] = last_learning_rate
+    if grouped_adamw:
+        metrics["optimizer_group_count"] = float(len(optimizer.param_groups))
     return model, tokenizer, metrics
