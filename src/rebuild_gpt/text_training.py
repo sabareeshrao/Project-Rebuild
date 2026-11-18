@@ -15,7 +15,7 @@ from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.tokenizer import CharTokenizer
-from rebuild_gpt.training import train_step
+from rebuild_gpt.training import train_accumulated_step, train_step
 
 
 def train_char_gpt(
@@ -42,6 +42,7 @@ def train_char_gpt(
     grouped_adamw: bool = False,
     weight_decay: float = 0.1,
     adam_betas: tuple[float, float] = (0.9, 0.95),
+    gradient_accumulation_steps: int = 1,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -82,6 +83,8 @@ def train_char_gpt(
         )
     if validation_mode not in ("sampled", "full"):
         raise ValueError("validation_mode must be sampled or full")
+    if type(gradient_accumulation_steps) is not int or gradient_accumulation_steps < 1:
+        raise ValueError("gradient_accumulation_steps must be positive")
     if type(grouped_adamw) is not bool:
         raise ValueError("grouped_adamw must be boolean")
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
@@ -145,10 +148,13 @@ def train_char_gpt(
     last_loss = float("nan")
     last_learning_rate = float(learning_rate)
     for step in range(1, steps + 1):
-        inputs, targets = sample_batch(
-            train, batch_size=batch_size, block_size=block_size,
-            generator=training_rng,
-        )
+        microbatches = [
+            sample_batch(
+                train, batch_size=batch_size, block_size=block_size,
+                generator=training_rng,
+            )
+            for _ in range(gradient_accumulation_steps)
+        ]
         if lr_decay_steps is not None:
             last_learning_rate = cosine_warmup_lr(
                 step - 1, max_lr=learning_rate, min_lr=min_lr,
@@ -156,9 +162,15 @@ def train_char_gpt(
             )
             for group in optimizer.param_groups:
                 group["lr"] = last_learning_rate
-        last_loss = train_step(
-            model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
-        )
+        if gradient_accumulation_steps == 1:
+            inputs, targets = microbatches[0]
+            last_loss = train_step(
+                model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
+            )
+        else:
+            last_loss = train_accumulated_step(
+                model, optimizer, microbatches, max_grad_norm=max_grad_norm,
+            )
         if eval_interval is not None and (step % eval_interval == 0 or step == steps):
             record_evaluation(step)
 
@@ -183,4 +195,8 @@ def train_char_gpt(
         metrics["learning_rate_last"] = last_learning_rate
     if grouped_adamw:
         metrics["optimizer_group_count"] = float(len(optimizer.param_groups))
+    if gradient_accumulation_steps > 1:
+        metrics["effective_tokens_per_step"] = float(
+            gradient_accumulation_steps * batch_size * block_size
+        )
     return model, tokenizer, metrics
