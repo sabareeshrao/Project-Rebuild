@@ -8,6 +8,7 @@ import torch
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.gpt import GPTLanguageModel
+from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.tokenizer import CharTokenizer
 from rebuild_gpt.training import train_step
 
@@ -23,6 +24,9 @@ def train_char_gpt(
     batch_size: int = 8,
     learning_rate: float = 0.02,
     seed: int = 7,
+    eval_interval: int | None = None,
+    eval_batches: int = 4,
+    history: list[dict[str, float | int]] | None = None,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -36,6 +40,15 @@ def train_char_gpt(
         raise ValueError("learning_rate must be finite and positive")
     if type(seed) is not int or seed < 0:
         raise ValueError("seed must be a nonnegative integer")
+
+    if eval_interval is not None and (type(eval_interval) is not int or eval_interval < 1):
+        raise ValueError("eval_interval must be a positive integer or None")
+    if type(eval_batches) is not int or eval_batches < 1:
+        raise ValueError("eval_batches must be a positive integer")
+    if history is not None and eval_interval is None:
+        raise ValueError("history requires eval_interval")
+    if history is not None:
+        history.clear()
 
     tokens, tokenizer = load_corpus(corpus_path)
     train, validation = split_train_val(tokens, val_fraction=0.2)
@@ -60,13 +73,27 @@ def train_char_gpt(
     model.eval()
     with torch.no_grad():
         before = model.loss(val_x, val_y).item()
+    def record_evaluation(step: int) -> None:
+        scores = estimate_train_val_loss(
+            model, train, validation,
+            batch_size=batch_size, block_size=block_size,
+            eval_batches=eval_batches, seed=seed + 2,
+        )
+        if history is not None:
+            history.append({"step": step, **scores})
+
+    if eval_interval is not None:
+        record_evaluation(0)
+
     last_loss = float("nan")
-    for _ in range(steps):
+    for step in range(1, steps + 1):
         inputs, targets = sample_batch(
             train, batch_size=batch_size, block_size=block_size,
             generator=training_rng,
         )
         last_loss = train_step(model, optimizer, inputs, targets)
+        if eval_interval is not None and (step % eval_interval == 0 or step == steps):
+            record_evaluation(step)
 
     model.eval()
     with torch.no_grad():
