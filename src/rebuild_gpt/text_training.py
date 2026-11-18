@@ -5,10 +5,12 @@ from pathlib import Path
 
 import torch
 
+from rebuild_gpt.best_model import BestValidationModel
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.evaluation import estimate_train_val_loss
+from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.tokenizer import CharTokenizer
 from rebuild_gpt.training import train_step
 
@@ -27,6 +29,8 @@ def train_char_gpt(
     eval_interval: int | None = None,
     eval_batches: int = 4,
     history: list[dict[str, float | int]] | None = None,
+    restore_best: bool = False,
+    best_checkpoint_path: str | Path | None = None,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -47,6 +51,10 @@ def train_char_gpt(
         raise ValueError("eval_batches must be a positive integer")
     if history is not None and eval_interval is None:
         raise ValueError("history requires eval_interval")
+    if (restore_best or best_checkpoint_path is not None) and eval_interval is None:
+        raise ValueError("Best-model tracking requires eval_interval")
+    if type(restore_best) is not bool:
+        raise ValueError("restore_best must be boolean")
     if history is not None:
         history.clear()
 
@@ -73,6 +81,8 @@ def train_char_gpt(
     model.eval()
     with torch.no_grad():
         before = model.loss(val_x, val_y).item()
+    tracker = BestValidationModel() if (restore_best or best_checkpoint_path is not None) else None
+
     def record_evaluation(step: int) -> None:
         scores = estimate_train_val_loss(
             model, train, validation,
@@ -81,6 +91,9 @@ def train_char_gpt(
         )
         if history is not None:
             history.append({"step": step, **scores})
+        if tracker is not None and tracker.consider(model, step, scores["validation_loss"]):
+            if best_checkpoint_path is not None:
+                save_text_checkpoint(model, tokenizer, best_checkpoint_path)
 
     if eval_interval is not None:
         record_evaluation(0)
@@ -95,11 +108,18 @@ def train_char_gpt(
         if eval_interval is not None and (step % eval_interval == 0 or step == steps):
             record_evaluation(step)
 
+    if restore_best:
+        assert tracker is not None
+        tracker.restore(model)
     model.eval()
     with torch.no_grad():
         after = model.loss(val_x, val_y).item()
-    return model, tokenizer, {
+    metrics = {
         "train_loss_last": last_loss,
         "validation_before": before,
         "validation_after": after,
     }
+    if tracker is not None:
+        metrics["best_validation_loss"] = tracker.best_loss
+        metrics["best_step"] = float(tracker.best_step)
+    return model, tokenizer, metrics
