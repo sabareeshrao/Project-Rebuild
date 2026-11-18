@@ -66,3 +66,30 @@ Read `lessons/03_character_vocabulary.md` through `lessons/07_sample_batch.md`
 in order. The checked-in `data/tiny_story.txt` is original example text.
 For now we use **character-level** tokenization to learn the fundamentals;
 later phases will cover nanoGPT-compatible tokenization and transformers.
+
+## Prediction and evaluation (commits 011–015)
+
+Before building a learnable transformer, we establish a measurable baseline:
+
+```text
+tokens -> context windows [B,T]
+       -> next-token scores (logits) [B,T,V]
+       -> probabilities (softmax over V)
+       -> compare with targets [B,T] using cross-entropy
+```
+
+Run the new examples from the repository root:
+
+```bash
+python examples/08_uniform_baseline.py
+python examples/09_unigram_probabilities.py
+python examples/10_softmax.py
+python examples/11_cross_entropy.py
+python examples/12_compare_baselines.py
+python -m pytest
+```
+
+The toy baselines have **no learned neural-network weights**. We use
+training data only to estimate unigram frequencies, then compare both
+baselines on the same held-out batch. Read lessons 08–12 in `lessons/`
+for equations, experiments, and understanding checkpoints.
