@@ -47,3 +47,43 @@ def test_generation_validates_input_even_when_no_tokens_requested():
         model.generate(torch.tensor([], dtype=torch.long), 0)
     with pytest.raises(ValueError, match="outside vocabulary"):
         model.generate(torch.tensor([[99]]), 0)
+
+
+def test_generation_crops_long_prompt_but_preserves_full_output():
+    model = make_model()
+    prompt = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7, 8, 0, 1]])
+    seed = 31
+    full = model.generate(prompt, 4, generator=torch.Generator().manual_seed(seed))
+    suffix = model.generate(prompt[:, -8:], 4, generator=torch.Generator().manual_seed(seed))
+    assert full.shape == (1, 15)
+    assert torch.equal(full[:, :11], prompt)
+    assert torch.equal(full[:, 11:], suffix[:, 8:])
+
+
+def test_generation_passes_at_most_block_size_tokens_to_model():
+    model = make_model()
+    observed = []
+    original = model.forward_nanogpt
+
+    def record_context(tokens, targets=None):
+        observed.append(tokens.size(1))
+        return original(tokens, targets)
+
+    model.forward_nanogpt = record_context
+    prompt = torch.tensor([[0, 1, 2, 3, 4, 5, 6, 7, 8, 0]])
+    model.generate(prompt, 3, generator=torch.Generator().manual_seed(3))
+    assert observed == [8, 8, 8]
+
+
+def test_generation_fills_short_prompt_before_cropping():
+    model = make_model()
+    observed = []
+    original = model.forward_nanogpt
+
+    def record_context(tokens, targets=None):
+        observed.append(tokens.size(1))
+        return original(tokens, targets)
+
+    model.forward_nanogpt = record_context
+    model.generate(torch.tensor([[0, 1, 2, 3, 4, 5, 6]]), 4)
+    assert observed == [7, 8, 8, 8]

@@ -68,7 +68,7 @@ class GPTLanguageModel(nn.Module):
         *,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
-        """Sample next tokens from GPT; contexts must fit the block size for now."""
+        """Sample next tokens while keeping only the most recent context window."""
         if type(max_new_tokens) is not int or max_new_tokens < 0:
             raise ValueError("max_new_tokens must be a nonnegative integer")
         if (
@@ -81,7 +81,9 @@ class GPTLanguageModel(nn.Module):
 
         generated = token_ids
         for _ in range(max_new_tokens):
-            last_logits, _ = self.forward_nanogpt(generated)
+            # The output grows without bound; the model only sees its last block_size IDs.
+            context = generated[:, -self.config.block_size:]
+            last_logits, _ = self.forward_nanogpt(context)
             probabilities = torch.softmax(last_logits[:, -1, :], dim=-1)
             next_id = torch.multinomial(probabilities, num_samples=1, generator=generator)
             generated = torch.cat((generated, next_id), dim=1)
