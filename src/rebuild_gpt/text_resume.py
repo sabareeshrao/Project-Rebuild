@@ -56,6 +56,11 @@ def save_text_training_state(
         "optimizer": optimizer.state_dict(),
         "step": step,
         "cpu_rng_state": torch.get_rng_state(),
+        # GPU dropout uses a separate RNG. No CUDA initialization on CPU runs.
+        "cuda_rng_state_all": (
+            torch.cuda.get_rng_state_all()
+            if next(model.parameters()).device.type == "cuda" else None
+        ),
         "batch_generator_state": batch_generator.get_state(),
         "history": list(history),
         "validation_before": float(validation_before),

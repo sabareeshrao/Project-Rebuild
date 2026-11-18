@@ -165,6 +165,11 @@ def train_char_gpt(
         optimizer.load_state_dict(saved["optimizer"])
         training_rng.set_state(saved["batch_generator_state"])
         torch.set_rng_state(saved["cpu_rng_state"])
+        if compute_device.type == "cuda":
+            cuda_states = saved.get("cuda_rng_state_all")
+            if not isinstance(cuda_states, list) or not cuda_states:
+                raise ValueError("Checkpoint lacks CUDA RNG state for GPU resume")
+            torch.cuda.set_rng_state_all(cuda_states)
         if tracker is not None:
             if saved["best_state"] is None:
                 raise ValueError("Checkpoint is missing best-model tracking state")

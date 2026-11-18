@@ -87,3 +87,50 @@ def test_failed_save_does_not_destroy_last_good_resume_point(tmp_path, monkeypat
         save_text_training_state(output, **kwargs)
     assert output.read_bytes() == known_good
     assert not list(tmp_path.glob(".train_state.pt.*.tmp"))
+
+
+def test_cpu_checkpoint_does_not_initialize_or_require_cuda(tmp_path):
+    corpus = tmp_path / "cpu.txt"
+    corpus.write_text("abcabc", encoding="utf-8")
+    model = ToyModel()
+    opt = torch.optim.AdamW(model.parameters())
+    output = tmp_path / "cpu.pt"
+    save_text_training_state(
+        output, model=model, tokenizer=ToyTokenizer(), optimizer=opt,
+        corpus_path=corpus, controls={"device": "cpu"}, step=0,
+        batch_generator=torch.Generator().manual_seed(1),
+        history=[], validation_before=1.0, last_loss=1.0, last_learning_rate=0.01,
+    )
+    state = load_text_training_state(
+        output, model=model, tokenizer=ToyTokenizer(), corpus_path=corpus,
+        controls={"device": "cpu"},
+    )
+    assert state["cuda_rng_state_all"] is None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_cuda_rng_states_are_saved_for_gpu_training(tmp_path):
+    from rebuild_gpt.config import GPTConfig
+    from rebuild_gpt.gpt import GPTLanguageModel
+    from rebuild_gpt.tokenizer import CharTokenizer
+
+    corpus = tmp_path / "cuda.txt"
+    corpus.write_text("ababababab", encoding="utf-8")
+    model = GPTLanguageModel(
+        GPTConfig(2, 3, 8, 2, 1, dropout=0.2, attention_impl="fused")
+    ).to("cuda")
+    optimizer = torch.optim.AdamW(model.parameters())
+    path = tmp_path / "cuda.pt"
+    save_text_training_state(
+        path, model=model, tokenizer=CharTokenizer("ab"),
+        optimizer=optimizer, corpus_path=corpus,
+        controls={"device": "cuda"}, step=0,
+        batch_generator=torch.Generator().manual_seed(7),
+        history=[], validation_before=1.0, last_loss=1.0, last_learning_rate=0.01,
+    )
+    state = load_text_training_state(
+        path, model=model, tokenizer=CharTokenizer("ab"),
+        corpus_path=corpus, controls={"device": "cuda"},
+    )
+    assert isinstance(state["cuda_rng_state_all"], list)
+    assert len(state["cuda_rng_state_all"]) == torch.cuda.device_count()
