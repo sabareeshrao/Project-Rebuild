@@ -243,3 +243,37 @@ next-token predictions, confirming the model can use earlier context.
 
 **Not yet a GPT transformer block:** LayerNorm, a feed-forward MLP,
 stacked blocks and efficient fused attention remain to be built.
+
+## First GPT-style transformer block (commits 041–045)
+
+We now have a complete **pre-LayerNorm causal transformer block**,
+with one multi-head attention sublayer and one GELU feed-forward MLP.
+Both have residual connections. A one-block language model applies
+token/position embeddings, the block, final LayerNorm, vocabulary
+projection and cross-entropy.
+
+```text
+token IDs [B,T] -> embeddings [B,T,C]
+  -> LayerNorm -> multi-head attention -> residual add
+  -> LayerNorm -> GELU feed-forward   -> residual add
+  -> final LayerNorm -> logits [B,T,V] -> cross-entropy
+```
+
+Run:
+
+```bash
+python examples/38_feature_normalization.py
+python examples/39_affine_layernorm.py
+python examples/40_feedforward.py
+python examples/41_transformer_block.py
+python examples/42_train_one_block.py
+python -m pytest
+```
+
+Read `lessons/38_feature_normalization.md` through
+`lessons/42_train_one_block.md`. The toy training experiment checks
+whether attention can use an earlier token to predict the next one.
+
+**Not yet original nanoGPT:** We use a single readable block and
+separate attention heads. Stacking blocks, efficiency improvements,
+training infrastructure, and checkpoint compatibility come later.
