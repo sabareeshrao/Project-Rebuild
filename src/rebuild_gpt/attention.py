@@ -100,3 +100,17 @@ def weighted_sum_values(weights: torch.Tensor, values: torch.Tensor) -> torch.Te
     ):
         raise ValueError("Expected float weights [B,T,S] and values [B,S,D] with matching B,S")
     return weights @ values
+
+
+class CausalSelfAttentionHead(nn.Module):
+    """One complete causal head: scaled QK weights times learned V vectors."""
+
+    def __init__(self, n_embd: int, head_size: int) -> None:
+        super().__init__()
+        self.attention_weights = CausalAttentionWeights(n_embd, head_size)
+        self.values = ValueProjection(n_embd, head_size)
+
+    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+        weights = self.attention_weights(hidden)
+        values = self.values(hidden)
+        return weighted_sum_values(weights, values)

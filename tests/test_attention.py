@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from rebuild_gpt.attention import CausalAttentionWeights, ValueProjection, weighted_sum_values, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
+from rebuild_gpt.attention import CausalAttentionWeights, CausalSelfAttentionHead, ValueProjection, weighted_sum_values, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -158,3 +158,30 @@ def test_weighted_sum_is_batched_differentiable_matrix_multiplication():
 def test_weighted_sum_rejects_dimension_mismatch(weights, values):
     with pytest.raises(ValueError, match="B,S"):
         weighted_sum_values(weights, values)
+
+
+def test_single_head_matches_direct_pytorch_reference():
+    torch.manual_seed(0)
+    head = CausalSelfAttentionHead(n_embd=6, head_size=3)
+    hidden = torch.randn(2, 4, 6, requires_grad=True)
+    actual = head(hidden)
+    q, k = head.attention_weights.projections(hidden)
+    v = head.values(hidden)
+    scores = (q @ k.transpose(-2, -1)) / math.sqrt(3)
+    future = torch.ones(4, 4, dtype=torch.bool).triu(1)
+    reference = scores.masked_fill(future, float("-inf")).softmax(dim=-1) @ v
+    assert actual.shape == (2, 4, 3)
+    assert torch.allclose(actual, reference, atol=1e-6)
+    actual.sum().backward()
+    assert hidden.grad is not None
+    assert all(parameter.grad is not None for parameter in head.parameters())
+
+
+def test_single_head_prefix_outputs_do_not_depend_on_future():
+    torch.manual_seed(1)
+    head = CausalSelfAttentionHead(4, 2)
+    hidden = torch.randn(2, 5, 4)
+    changed = hidden.clone()
+    changed[:, 3:, :] += 100
+    assert torch.allclose(head(hidden)[:, :3], head(changed)[:, :3], atol=1e-6)
+    assert torch.allclose(head(hidden)[:, :3], head(hidden[:, :3]), atol=1e-6)
