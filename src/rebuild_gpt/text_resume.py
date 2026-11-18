@@ -38,6 +38,7 @@ def save_text_training_state(
     last_loss: float,
     last_learning_rate: float,
     best_state: dict | None = None,
+    scaler: torch.cuda.amp.GradScaler | None = None,
 ) -> None:
     """Save weights, AdamW internals, RNG states, and progress metadata."""
     if type(step) is not int or step < 0:
@@ -54,6 +55,7 @@ def save_text_training_state(
         "controls": controls,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
+        "grad_scaler_state": scaler.state_dict() if scaler is not None else None,
         "step": step,
         "cpu_rng_state": torch.get_rng_state(),
         # GPU dropout uses a separate RNG. No CUDA initialization on CPU runs.

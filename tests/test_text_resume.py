@@ -134,3 +134,49 @@ def test_cuda_rng_states_are_saved_for_gpu_training(tmp_path):
     )
     assert isinstance(state["cuda_rng_state_all"], list)
     assert len(state["cuda_rng_state_all"]) == torch.cuda.device_count()
+
+
+def test_fp16_scaler_state_is_persisted_without_accelerator(tmp_path):
+    """A fake scaler checks serialization without pretending to execute CUDA."""
+    corpus = tmp_path / "text.txt"
+    corpus.write_text("ababab", encoding="utf-8")
+    model = ToyModel()
+    optimizer = torch.optim.AdamW(model.parameters())
+
+    class FakeScaler:
+        def state_dict(self):
+            return {"scale": 128.0, "growth_tracker": 3}
+
+    path = tmp_path / "state.pt"
+    save_text_training_state(
+        path, model=model, tokenizer=ToyTokenizer(), optimizer=optimizer,
+        corpus_path=corpus, controls={"precision": "fp16"}, step=2,
+        batch_generator=torch.Generator().manual_seed(3),
+        history=[], validation_before=0.9, last_loss=0.8,
+        last_learning_rate=0.01, scaler=FakeScaler(),
+    )
+    loaded = load_text_training_state(
+        path, model=model, tokenizer=ToyTokenizer(),
+        corpus_path=corpus, controls={"precision": "fp16"},
+    )
+    assert loaded["grad_scaler_state"] == {"scale": 128.0, "growth_tracker": 3}
+
+
+def test_no_scaler_preserves_legacy_cpu_resume_compatibility(tmp_path):
+    corpus = tmp_path / "text.txt"
+    corpus.write_text("ababab", encoding="utf-8")
+    model = ToyModel()
+    optimizer = torch.optim.AdamW(model.parameters())
+    path = tmp_path / "state.pt"
+    save_text_training_state(
+        path, model=model, tokenizer=ToyTokenizer(), optimizer=optimizer,
+        corpus_path=corpus, controls={}, step=1,
+        batch_generator=torch.Generator().manual_seed(4),
+        history=[], validation_before=0.9, last_loss=0.8,
+        last_learning_rate=0.01,
+    )
+    saved = load_text_training_state(
+        path, model=model, tokenizer=ToyTokenizer(),
+        corpus_path=corpus, controls={},
+    )
+    assert saved["grad_scaler_state"] is None

@@ -98,10 +98,6 @@ def train_char_gpt(
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
     compute_device = resolve_device(device)
     resolve_precision(compute_device, precision)
-    # Until the next checkpoint lesson, avoid silently dropping GradScaler
-    # state when an fp16 run requests resumable training.
-    if precision == "fp16" and (resume_from is not None or training_state_path is not None):
-        raise ValueError("fp16 resumable checkpoints require scaler-state support")
     if history is not None:
         history.clear()
 
@@ -173,6 +169,11 @@ def train_char_gpt(
             raise ValueError("steps must exceed the resumed checkpoint step")
         model.load_state_dict(saved["model"], strict=True)
         optimizer.load_state_dict(saved["optimizer"])
+        if scaler is not None:
+            scaler_state = saved.get("grad_scaler_state")
+            if not isinstance(scaler_state, dict) or not scaler_state:
+                raise ValueError("Checkpoint lacks FP16 GradScaler state")
+            scaler.load_state_dict(scaler_state)
         training_rng.set_state(saved["batch_generator_state"])
         torch.set_rng_state(saved["cpu_rng_state"])
         if compute_device.type == "cuda":
@@ -262,6 +263,7 @@ def train_char_gpt(
             validation_before=before, last_loss=last_loss,
             last_learning_rate=last_learning_rate,
             best_state=tracker.state_dict() if tracker is not None else None,
+            scaler=scaler,
         )
 
     if restore_best:
