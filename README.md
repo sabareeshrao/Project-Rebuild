@@ -678,3 +678,24 @@ python -m pytest tests/test_precision.py tests/test_amp_steps.py \
 Read `lessons/98_precision_policy.md` through
 `lessons/102_mixed_precision_cli.md`. CUDA FP16 behavior and performance
 still require tests on GPU hardware. Distributed training is a later goal.
+
+## Optimized scaled-dot-product attention (commits 106–110)
+
+The original fused-manual QKV path is preserved for education and
+checkpoint parity, with a new SDPA computation option:
+
+```bash
+python -m rebuild_gpt.train_cli --attention-impl sdpa --steps 2
+python examples/88_attention_benchmark.py --iterations 10 --warmup 3
+python -m pytest tests/test_sdpa_attention.py tests/test_sdpa_gpt.py \
+  tests/test_sdpa_training.py tests/test_attention_benchmark.py -q
+```
+
+The manual and SDPA modules use **the same parameter names and shapes**.
+The attention calculation may select different kernels and differ
+slightly numerically. Benchmark results depend on CPU/GPU, precision,
+sequence length and warmup; speedups are not guaranteed.
+
+Lessons: `103_sdpa_attention.md` through `107_sdpa_benchmark.md`.
+GitHub Actions now runs CPU tests; GPU coverage still needs a runner
+with CUDA hardware.

@@ -16,6 +16,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Where model computation runs (default: cpu)")
     parser.add_argument("--precision", choices=("fp32", "bf16", "fp16"), default="fp32",
                         help="Computation dtype; fp16 needs CUDA and uses GradScaler")
+    parser.add_argument("--attention-impl", choices=("fused", "sdpa"), default="fused",
+                        help="Manual fused attention or PyTorch SDPA (default: fused)")
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-embd", type=int, default=16)
@@ -79,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             training_state_path=args.training_state,
             device=args.device,
             precision=args.precision,
+            attention_impl=args.attention_impl,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))

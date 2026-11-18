@@ -50,6 +50,7 @@ def train_char_gpt(
     training_state_path: str | Path | None = None,
     device: str = "cpu",
     precision: str = "fp32",
+    attention_impl: str = "fused",
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -96,6 +97,8 @@ def train_char_gpt(
         raise ValueError("grouped_adamw must be boolean")
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
+    if attention_impl not in ("fused", "sdpa"):
+        raise ValueError("attention_impl must be fused or sdpa for text training")
     compute_device = resolve_device(device)
     resolve_precision(compute_device, precision)
     if history is not None:
@@ -107,7 +110,7 @@ def train_char_gpt(
         vocab_size=tokenizer.vocab_size,
         block_size=block_size,
         n_embd=n_embd, n_head=n_head, n_layer=n_layer,
-        attention_impl="fused",
+        attention_impl=attention_impl,
     )
     if len(train) <= block_size or len(validation) <= block_size:
         raise ValueError("Corpus is too short for block_size in train/validation")
