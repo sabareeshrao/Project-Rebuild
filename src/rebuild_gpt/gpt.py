@@ -8,7 +8,7 @@ from rebuild_gpt.embeddings import PositionEmbedding, TokenEmbedding, Vocabulary
 from rebuild_gpt.initialization import initialize_gpt_weights
 from rebuild_gpt.normalization import FeatureLayerNorm
 from rebuild_gpt.probability import next_token_cross_entropy
-from rebuild_gpt.sampling import scale_logits, validate_temperature
+from rebuild_gpt.sampling import filter_top_k, scale_logits, validate_temperature, validate_top_k
 from rebuild_gpt.stack import TransformerStack
 
 
@@ -68,6 +68,7 @@ class GPTLanguageModel(nn.Module):
         max_new_tokens: int,
         *,
         temperature: float = 1.0,
+        top_k: int | None = None,
         generator: torch.Generator | None = None,
     ) -> torch.Tensor:
         """Sample next tokens while keeping only the most recent context window."""
@@ -82,12 +83,15 @@ class GPTLanguageModel(nn.Module):
             raise ValueError("token ID outside vocabulary")
 
         temperature = validate_temperature(temperature)
+        top_k = validate_top_k(top_k)
         generated = token_ids
         for _ in range(max_new_tokens):
             # The output grows without bound; the model only sees its last block_size IDs.
             context = generated[:, -self.config.block_size:]
             last_logits, _ = self.forward_nanogpt(context)
-            probabilities = torch.softmax(scale_logits(last_logits[:, -1, :], temperature), dim=-1)
+            scaled = scale_logits(last_logits[:, -1, :], temperature)
+            candidate_logits = filter_top_k(scaled, top_k)
+            probabilities = torch.softmax(candidate_logits, dim=-1)
             next_id = torch.multinomial(probabilities, num_samples=1, generator=generator)
             generated = torch.cat((generated, next_id), dim=1)
         return generated

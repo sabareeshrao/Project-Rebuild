@@ -101,3 +101,27 @@ def test_seeded_sampling_with_temperature_is_reproducible():
     a = model.generate(x, 5, temperature=0.7, generator=torch.Generator().manual_seed(26))
     b = model.generate(x, 5, temperature=0.7, generator=torch.Generator().manual_seed(26))
     assert torch.equal(a, b)
+
+
+def test_top_k_one_always_chooses_argmax():
+    model = make_model()
+    x = torch.tensor([[1, 2]])
+    expected = model.forward_nanogpt(x)[0][:, -1, :].argmax(dim=-1)
+    generated = model.generate(
+        x, 1, top_k=1, temperature=3.0,
+        generator=torch.Generator().manual_seed(7),
+    )
+    assert torch.equal(generated[:, -1], expected)
+
+
+def test_top_k_rejected_even_when_no_steps_requested():
+    with pytest.raises(ValueError, match="top_k"):
+        make_model().generate(torch.tensor([[1, 2]]), 0, top_k=0)
+
+
+def test_top_k_is_deterministic_given_the_same_rng_state():
+    model = make_model()
+    x = torch.tensor([[1, 2]])
+    a = model.generate(x, 6, top_k=3, generator=torch.Generator().manual_seed(10))
+    b = model.generate(x, 6, top_k=3, generator=torch.Generator().manual_seed(10))
+    assert torch.equal(a, b)
