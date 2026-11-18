@@ -563,3 +563,42 @@ targets under a **chunked context reset policy**. It does not mean a
 token-by-token sliding-window score or a representative benchmark
 on a large language corpus. Better validation estimates do not
 guarantee coherent generated text on the tiny included story.
+
+## Gradient accumulation and nanoGPT-style AdamW (commits 086–090)
+
+You can now accumulate **equally sized** microbatch gradients over
+multiple forward/backward passes, then clip and update **once**.
+Grouped AdamW uses nanoGPT's parameter-rank rule: matrices (2D+)
+receive configured weight decay, while biases and normalization
+vectors do not. Tied token/output embeddings are included once.
+
+Both behaviors are opt-in so old lessons keep their original results.
+
+```bash
+python -m rebuild_gpt.train_cli \
+  --corpus data/tiny_story.txt --steps 30 \
+  --gradient-accumulation-steps 3 \
+  --grouped-adamw --weight-decay 0.1 \
+  --adam-beta1 0.9 --adam-beta2 0.95 \
+  --grad-clip 1.0 \
+  --warmup-steps 3 --lr-decay-steps 25 --min-lr 0.002 \
+  --eval-every 10 \
+  --output out/char_gpt.pt \
+  --best-output out/best_char_gpt.pt \
+  --history-file out/training_history.json
+```
+
+`--steps` counts **optimizer updates**, not microbatches.
+The effective token positions per update are `batch_size *
+block_size * gradient_accumulation_steps` (sampled with replacement).
+The run metadata records optimizer group settings and accumulation.
+
+Run `examples/80_gradient_accumulation.py` through
+`examples/84_optimizer_training_cli.py`, study
+`lessons/83_gradient_accumulation.md` through
+`lessons/87_optimizer_training_cli.md`, and check `python -m pytest`.
+
+**Not yet the full nanoGPT training script:** This remains a
+single-process educational CPU workflow without mixed precision,
+distributed data parallelism, or complete optimizer checkpoint
+resume support for grouped optimizer configurations.

@@ -19,6 +19,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--n-layer", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=0.02)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    parser.add_argument("--grouped-adamw", action="store_true")
+    parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.95)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--eval-every", type=int, default=10)
     parser.add_argument("--eval-batches", type=int, default=4)
@@ -54,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
             lr_decay_steps=args.lr_decay_steps,
             min_lr=args.min_lr,
             validation_mode=args.validation_mode,
+            grouped_adamw=args.grouped_adamw,
+            weight_decay=args.weight_decay,
+            adam_betas=(args.adam_beta1, args.adam_beta2),
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -69,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
             "warmup_steps": args.warmup_steps,
             "lr_decay_steps": args.lr_decay_steps,
             "min_lr": args.min_lr,
+            "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "grouped_adamw": args.grouped_adamw,
+            "weight_decay": args.weight_decay if args.grouped_adamw else None,
+            "adam_betas": [args.adam_beta1, args.adam_beta2] if args.grouped_adamw else None,
         },
         "validation_mode": args.validation_mode,
         "metrics": metrics,
