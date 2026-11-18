@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from rebuild_gpt.attention import CausalAttentionWeights, ValueProjection, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
+from rebuild_gpt.attention import CausalAttentionWeights, ValueProjection, weighted_sum_values, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -131,3 +131,30 @@ def test_value_projection_rejects_invalid_hidden():
         layer(torch.randn(2, 4, 4))
     with pytest.raises(ValueError, match="n_embd"):
         layer(torch.randint(0, 5, (2, 4, 5)))
+
+
+def test_weighted_values_match_hand_calculation():
+    weights = torch.tensor([[[1., 0.], [0.25, 0.75]]])
+    values = torch.tensor([[[2., 0.], [0., 4.]]])
+    mixed = weighted_sum_values(weights, values)
+    assert torch.allclose(mixed, torch.tensor([[[2., 0.], [0.5, 3.]]]))
+
+
+def test_weighted_sum_is_batched_differentiable_matrix_multiplication():
+    weights = torch.randn(2, 3, 4, requires_grad=True)
+    values = torch.randn(2, 4, 5, requires_grad=True)
+    mixed = weighted_sum_values(weights, values)
+    assert mixed.shape == (2, 3, 5)
+    assert torch.allclose(mixed, weights @ values)
+    mixed.sum().backward()
+    assert weights.grad is not None and values.grad is not None
+
+
+@pytest.mark.parametrize("weights,values", [
+    (torch.randn(1, 2), torch.randn(1, 2, 3)),
+    (torch.randn(1, 2, 4), torch.randn(1, 3, 5)),
+    (torch.randn(2, 3, 2), torch.randn(1, 2, 2)),
+])
+def test_weighted_sum_rejects_dimension_mismatch(weights, values):
+    with pytest.raises(ValueError, match="B,S"):
+        weighted_sum_values(weights, values)

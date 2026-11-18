@@ -87,3 +87,16 @@ class ValueProjection(nn.Module):
         ):
             raise ValueError("hidden must be floating-point [B,T,n_embd]")
         return self.value(hidden)
+
+
+def weighted_sum_values(weights: torch.Tensor, values: torch.Tensor) -> torch.Tensor:
+    """Mix value vectors via attention probabilities: [B,T,S] @ [B,S,D]."""
+    if (
+        weights.ndim != 3 or values.ndim != 3
+        or weights.numel() == 0 or values.numel() == 0
+        or not weights.is_floating_point() or not values.is_floating_point()
+        or weights.shape[0] != values.shape[0]
+        or weights.shape[-1] != values.shape[-2]
+    ):
+        raise ValueError("Expected float weights [B,T,S] and values [B,S,D] with matching B,S")
+    return weights @ values
