@@ -13,6 +13,17 @@ class CharTokenizer:
         self.stoi = {char: index for index, char in enumerate(self.vocab)}
         self.itos = {index: char for char, index in self.stoi.items()}
 
+    @classmethod
+    def from_vocab(cls, vocab: list[str] | tuple[str, ...]) -> "CharTokenizer":
+        """Rebuild the exact character-to-ID mapping stored with a model."""
+        if not isinstance(vocab, (list, tuple)) or not vocab:
+            raise ValueError("vocab must be a non-empty list of characters")
+        if any(not isinstance(char, str) or len(char) != 1 for char in vocab):
+            raise ValueError("vocab entries must each be one character")
+        if tuple(vocab) != tuple(sorted(set(vocab))):
+            raise ValueError("vocab must contain unique characters in sorted order")
+        return cls("".join(vocab))
+
     @property
     def vocab_size(self) -> int:
         return len(self.vocab)
