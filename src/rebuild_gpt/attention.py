@@ -35,3 +35,9 @@ class QueryKeyProjection(nn.Module):
         ):
             raise ValueError("hidden must be floating-point [B,T,n_embd]")
         return self.query(hidden), self.key(hidden)
+
+
+def scaled_dot_scores(queries: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
+    """Scale pairwise dot products by inverse sqrt of query/key width."""
+    scores = pairwise_dot_scores(queries, keys)
+    return scores * (queries.size(-1) ** -0.5)

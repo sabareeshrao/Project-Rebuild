@@ -1,7 +1,9 @@
+import math
+
 import pytest
 import torch
 
-from rebuild_gpt.attention import QueryKeyProjection, pairwise_dot_scores
+from rebuild_gpt.attention import QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -47,3 +49,20 @@ def test_query_key_projection_rejects_bad_hidden_shape():
     layer = QueryKeyProjection(4, 2)
     with pytest.raises(ValueError, match="n_embd"):
         layer(torch.randn(2, 3, 5))
+
+
+def test_scaling_reduces_dot_products_by_sqrt_width():
+    queries = torch.tensor([[[2., 0.]]])
+    keys = torch.tensor([[[1., 0.], [2., 1.]]])
+    raw = pairwise_dot_scores(queries, keys)
+    scaled = scaled_dot_scores(queries, keys)
+    assert torch.allclose(scaled, raw / math.sqrt(2))
+
+
+def test_scaling_matches_pytorch_float_and_can_backpropagate():
+    q = torch.randn(2, 3, 4, requires_grad=True)
+    k = torch.randn(2, 3, 4, requires_grad=True)
+    scored = scaled_dot_scores(q, k)
+    assert torch.allclose(scored, torch.matmul(q, k.transpose(-2, -1)) / 2)
+    scored.sum().backward()
+    assert q.grad is not None and k.grad is not None
