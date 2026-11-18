@@ -172,3 +172,42 @@ Read `lessons/23_pairwise_dot_scores.md` through
 **Not a full attention head yet:** we have not projected value vectors
 or computed the weighted aggregation `weights @ values`. Those are
 the next lessons on our path toward nanoGPT.
+
+## Complete single-head causal self-attention (commits 031–035)
+
+We now produce **value vectors**, apply learned **causal attention
+weights** to them, and integrate the resulting single-head
+representation into a next-token language model with a residual path.
+
+```text
+hidden [B,T,C] -> Q,K [B,T,D] -> scaled causal weights [B,T,T] --+
+hidden [B,T,C] -> V [B,T,D] -------------------------------+------+
+                                                          |
+                                                   weights @ V [B,T,D]
+                                                          |
+                                                  linear projection [B,T,C]
+                                                          |
+                                             residual + hidden [B,T,C]
+                                                          |
+                                                   logits [B,T,V]
+```
+
+Run the new examples (after installing the project):
+
+```bash
+python examples/28_value_projection.py
+python examples/29_weighted_values.py
+python examples/30_single_attention_head.py
+python examples/31_attention_language_model.py
+python examples/32_train_attention_model.py
+python -m pytest
+```
+
+Read `lessons/28_value_projection.md` through
+`lessons/32_train_attention_model.md`. One experiment deliberately
+requires earlier-token context to disambiguate next-token targets.
+
+**Scope:** This is one complete **causal attention head**, not a full
+GPT-2 transformer. We still need multiple heads, layer normalization,
+feed-forward networks, stacked blocks, training refinements, and
+compatibility checks with original nanoGPT.
