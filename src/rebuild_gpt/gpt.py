@@ -5,6 +5,7 @@ from torch import nn
 
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.embeddings import PositionEmbedding, TokenEmbedding, VocabularyProjection
+from rebuild_gpt.initialization import initialize_gpt_weights
 from rebuild_gpt.normalization import FeatureLayerNorm
 from rebuild_gpt.probability import next_token_cross_entropy
 from rebuild_gpt.stack import TransformerStack
@@ -27,6 +28,7 @@ class GPTLanguageModel(nn.Module):
         if config.tie_embeddings:
             # Both paths use one Parameter; gradients and optimizer updates are shared.
             self.head.linear.weight = self.tokens.lookup.weight
+        initialize_gpt_weights(self, config.n_layer)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
         hidden = self.tokens(token_ids)
