@@ -68,3 +68,22 @@ class CausalAttentionWeights(nn.Module):
         queries, keys = self.projections(hidden)
         scores = scaled_dot_scores(queries, keys)
         return stable_softmax(causal_mask_scores(scores))
+
+
+class ValueProjection(nn.Module):
+    """Learn the content vectors to be mixed by attention weights."""
+
+    def __init__(self, n_embd: int, head_size: int) -> None:
+        super().__init__()
+        if n_embd < 1 or head_size < 1:
+            raise ValueError("n_embd and head_size must be positive")
+        self.n_embd = n_embd
+        self.value = nn.Linear(n_embd, head_size, bias=False)
+
+    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+        if (
+            hidden.ndim != 3 or hidden.numel() == 0
+            or not hidden.is_floating_point() or hidden.size(-1) != self.n_embd
+        ):
+            raise ValueError("hidden must be floating-point [B,T,n_embd]")
+        return self.value(hidden)

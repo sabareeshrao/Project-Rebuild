@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from rebuild_gpt.attention import CausalAttentionWeights, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
+from rebuild_gpt.attention import CausalAttentionWeights, ValueProjection, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -113,3 +113,21 @@ def test_attention_weights_backpropagate_to_query_and_key():
     assert hidden.grad is not None
     assert layer.projections.query.weight.grad is not None
     assert layer.projections.key.weight.grad is not None
+
+
+def test_value_projection_shapes_and_gradients():
+    layer = ValueProjection(n_embd=5, head_size=3)
+    hidden = torch.randn(2, 4, 5, requires_grad=True)
+    values = layer(hidden)
+    assert values.shape == (2, 4, 3)
+    values.sum().backward()
+    assert hidden.grad is not None
+    assert layer.value.weight.grad is not None
+
+
+def test_value_projection_rejects_invalid_hidden():
+    layer = ValueProjection(5, 3)
+    with pytest.raises(ValueError, match="n_embd"):
+        layer(torch.randn(2, 4, 4))
+    with pytest.raises(ValueError, match="n_embd"):
+        layer(torch.randint(0, 5, (2, 4, 5)))
