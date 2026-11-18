@@ -747,3 +747,31 @@ names and workload metadata, so review them before sharing.
 
 Read `lessons/113_memory_budget.md` through
 `lessons/117_operator_profiler.md` in order.
+
+## Activation memory and checkpointing (commits 121–125)
+
+Learn why explicit attention scores scale as `[B,H,T,T]` and how
+non-reentrant activation checkpointing can trade extra backward
+compute for fewer saved intermediate tensors.
+
+```bash
+python -m pytest tests/test_activation_memory.py \
+  tests/test_activation_checkpointing.py tests/test_checkpointed_gpt.py \
+  tests/test_checkpointed_training.py tests/test_checkpoint_benchmark.py -q
+
+# Train a tiny GPT with block checkpointing enabled
+python -m rebuild_gpt.train_cli --steps 2 \
+  --attention-impl sdpa --activation-checkpointing
+
+# Compare full training-step latency, optionally CUDA allocator deltas
+python examples/93_activation_checkpoint_benchmark.py --device cpu
+```
+
+Activation checkpointing changes **training computation**, not model
+parameter names or inference checkpoint format. The flag is recorded
+in resumable training controls when active; mismatched resumes are
+rejected. CPU tests validate numerical gradients, dropout replay and
+CLI behavior; real CUDA memory savings require supported GPU hardware.
+
+Read `lessons/118_attention_matrix_scaling.md` through
+`lessons/122_checkpoint_benchmark.md` for the five exercises.
