@@ -14,6 +14,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--corpus", default="data/tiny_story.txt")
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu",
                         help="Where model computation runs (default: cpu)")
+    parser.add_argument("--precision", choices=("fp32", "bf16", "fp16"), default="fp32",
+                        help="Computation dtype; fp16 needs CUDA and uses GradScaler")
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-embd", type=int, default=16)
@@ -76,6 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             resume_from=args.resume_from,
             training_state_path=args.training_state,
             device=args.device,
+            precision=args.precision,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -85,12 +88,14 @@ def main(argv: list[str] | None = None) -> int:
         "corpus": str(args.corpus),
         "seed": args.seed,
         "requested_device": args.device,
+        "requested_precision": args.precision,
         "model_config": asdict(model.config),
         "restored_best": args.restore_best,
         "target_steps": args.steps,
         "resumed_from": args.resume_from,
         "training_state": args.training_state,
         "training_controls": {
+            "precision": args.precision,
             "grad_clip": args.grad_clip,
             "warmup_steps": args.warmup_steps,
             "lr_decay_steps": args.lr_decay_steps,

@@ -658,3 +658,23 @@ checkpoints retain CUDA RNG state for dropout, alongside the CPU RNG
 and batch-sampling generator. Resume requires compatible training
 controls and the same selected backend. Mixed precision and
 distributed training are not implemented yet.
+
+## Mixed precision training (commits 101–105)
+
+These lessons add explicit FP32 (default), BF16 and CUDA FP16 computation.
+Model parameters and AdamW state remain FP32; autocast wraps forward
+passes and validation. CUDA FP16 uses dynamic loss scaling, unscales
+before clipping, and stores its scaler state for resumable training.
+
+```bash
+python -m rebuild_gpt.train_cli --device cpu --precision bf16 --steps 2
+python examples/87_mixed_precision.py --device cpu --precision bf16
+# Requires a supported CUDA GPU:
+python -m rebuild_gpt.train_cli --device cuda --precision fp16 --steps 2
+python -m pytest tests/test_precision.py tests/test_amp_steps.py \
+  tests/test_mixed_precision_training.py tests/test_precision_cli.py -q
+```
+
+Read `lessons/98_precision_policy.md` through
+`lessons/102_mixed_precision_cli.md`. CUDA FP16 behavior and performance
+still require tests on GPU hardware. Distributed training is a later goal.

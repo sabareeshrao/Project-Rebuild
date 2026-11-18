@@ -28,7 +28,10 @@ def _finish_optimizer_step(
         scaler.unscale_(optimizer)
     if max_grad_norm is not None:
         torch.nn.utils.clip_grad_norm_(
-            model.parameters(), max_grad_norm, error_if_nonfinite=True
+            # FP16 GradScaler detects overflow and skips the update.
+            # Do not raise before the scaler can handle nonfinite grads.
+            model.parameters(), max_grad_norm,
+            error_if_nonfinite=(scaler is None)
         )
     if scaler is None:
         optimizer.step()

@@ -75,3 +75,26 @@ def test_gradients_are_unscaled_before_clipping():
     _finish_optimizer_step(model, opt, 1.0, TestScaler())
     assert calls == ["unscale", "step", "update"]
     assert model.weight.grad.abs().item() <= 1.001
+
+
+def test_fp16_overflow_can_skip_update_after_unscaling():
+    model = torch.nn.Linear(1, 1, bias=False)
+    opt = torch.optim.SGD(model.parameters(), lr=0.1)
+    old = model.weight.detach().clone()
+    model.weight.grad = torch.tensor([[float("inf")]])
+    events = []
+
+    class SkippingScaler:
+        def unscale_(self, optimizer):
+            events.append("unscale")
+
+        def step(self, optimizer):
+            # Mirrors GradScaler skipping a step when nonfinite grads occur.
+            events.append("skip")
+
+        def update(self):
+            events.append("update")
+
+    _finish_optimizer_step(model, opt, 1.0, SkippingScaler())
+    assert events == ["unscale", "skip", "update"]
+    assert torch.equal(model.weight, old)
