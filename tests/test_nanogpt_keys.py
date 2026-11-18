@@ -58,3 +58,14 @@ def test_nonfused_or_untied_paths_are_not_exportable():
         export_nanogpt_state_dict(GPTLanguageModel(GPTConfig(9, 5, 8, 2, 1)))
     with pytest.raises(ValueError, match="fused"):
         export_nanogpt_state_dict(GPTLanguageModel(GPTConfig(9, 5, 8, 2, 1, tie_embeddings=False, attention_impl="fused")))
+
+
+def test_sdpa_is_accepted_by_upstream_key_mapper_without_relaxing_legacy_guard():
+    sdpa = GPTLanguageModel(
+        GPTConfig(9, 5, 8, 2, 1, attention_impl="sdpa")
+    )
+    assert export_nanogpt_state_dict(sdpa)["transformer.wte.weight"].shape == (9, 8)
+    with pytest.raises(ValueError, match="fused attention"):
+        export_nanogpt_state_dict(
+            GPTLanguageModel(GPTConfig(9, 5, 8, 2, 1))
+        )
