@@ -48,3 +48,21 @@ python -m pytest
 
 Each lesson in `lessons/` explains the problem, a code experiment, and a
 question to answer before moving to the next commit.
+
+## Text-to-batch pipeline (commits 006–010)
+
+Run the new learning exercises from the repository root after installation:
+
+```bash
+python examples/03_character_vocabulary.py
+python examples/04_encode_decode.py
+python examples/05_load_corpus.py
+python examples/06_split_train_val.py
+python examples/07_sample_batch.py
+python -m pytest
+```
+
+Read `lessons/03_character_vocabulary.md` through `lessons/07_sample_batch.md`
+in order. The checked-in `data/tiny_story.txt` is original example text.
+For now we use **character-level** tokenization to learn the fundamentals;
+later phases will cover nanoGPT-compatible tokenization and transformers.

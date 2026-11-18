@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 
 from rebuild_gpt.tokenizer import CharTokenizer
+from rebuild_gpt.tensors import next_token_pairs
 
 
 def load_corpus(path: str | Path) -> tuple[torch.Tensor, CharTokenizer]:
@@ -27,3 +28,26 @@ def split_train_val(
     if split_at < 2 or len(tokens) - split_at < 2:
         raise ValueError("Both training and validation require at least two tokens")
     return tokens[:split_at], tokens[split_at:]
+
+
+def sample_batch(
+    tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    block_size: int,
+    generator: torch.Generator | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample random overlapping contexts and their next-token targets."""
+    if tokens.ndim != 1 or tokens.dtype != torch.long:
+        raise ValueError("Expected a flat torch.long token stream")
+    if batch_size < 1 or block_size < 1:
+        raise ValueError("batch_size and block_size must be positive")
+    if len(tokens) <= block_size:
+        raise ValueError("Need at least block_size + 1 tokens")
+
+    starts = torch.randint(
+        0, len(tokens) - block_size, (batch_size,), generator=generator, device=tokens.device
+    )
+    offsets = torch.arange(block_size + 1, device=tokens.device)
+    windows = tokens[starts[:, None] + offsets]
+    return next_token_pairs(windows)
