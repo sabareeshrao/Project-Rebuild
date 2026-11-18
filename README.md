@@ -112,3 +112,33 @@ python -m pytest
 
 Read `lessons/13_bigram_lookup.md` through
 `lessons/17_train_bigram.md` before proceeding to vector embeddings.
+
+## Token vectors and learned positions (commits 021–025)
+
+These five lessons extend token IDs into trainable embedding vectors,
+add a projection head, and incorporate absolute positions:
+
+```text
+token IDs [B,T] -> token vectors [B,T,C] --------+
+positions [T] -> position vectors [T,C] ----------+-> sum [B,T,C]
+                                                        |
+                                                linear output head
+                                                        |
+                                                logits [B,T,V]
+```
+
+They culminate in a small position-dependent training experiment:
+
+```bash
+python examples/18_token_embeddings.py
+python examples/19_output_projection.py
+python examples/20_position_embeddings.py
+python examples/21_position_aware_model.py
+python examples/22_train_embedding_model.py
+python -m pytest
+```
+
+Read `lessons/18_token_embeddings.md` through
+`lessons/22_train_embedding_model.md`. **Important:** this model cannot
+yet condition on *previous* tokens. Causal self-attention is the next
+architectural milestone.

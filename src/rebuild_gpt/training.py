@@ -1,12 +1,20 @@
 """Small, explicit training operations for an educational language model."""
 
+from typing import Protocol
+
 import torch
 
-from rebuild_gpt.bigram import BigramLanguageModel
+
+class TrainableLanguageModel(Protocol):
+    """The two behaviors our optimizer helper needs from any model."""
+
+    def train(self, mode: bool = True) -> object: ...
+
+    def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor: ...
 
 
 def train_step(
-    model: BigramLanguageModel,
+    model: TrainableLanguageModel,
     optimizer: torch.optim.Optimizer,
     inputs: torch.Tensor,
     targets: torch.Tensor,
