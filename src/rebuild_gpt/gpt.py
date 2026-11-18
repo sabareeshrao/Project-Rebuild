@@ -60,5 +60,32 @@ class GPTLanguageModel(nn.Module):
         )
         return logits, loss
 
+    @torch.no_grad()
+    def generate(
+        self,
+        token_ids: torch.Tensor,
+        max_new_tokens: int,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> torch.Tensor:
+        """Sample next tokens from GPT; contexts must fit the block size for now."""
+        if type(max_new_tokens) is not int or max_new_tokens < 0:
+            raise ValueError("max_new_tokens must be a nonnegative integer")
+        if (
+            token_ids.ndim != 2 or token_ids.numel() == 0
+            or token_ids.dtype != torch.long
+        ):
+            raise ValueError("token_ids must be a non-empty [batch, time] long tensor")
+        if (token_ids < 0).any() or (token_ids >= self.config.vocab_size).any():
+            raise ValueError("token ID outside vocabulary")
+
+        generated = token_ids
+        for _ in range(max_new_tokens):
+            last_logits, _ = self.forward_nanogpt(generated)
+            probabilities = torch.softmax(last_logits[:, -1, :], dim=-1)
+            next_id = torch.multinomial(probabilities, num_samples=1, generator=generator)
+            generated = torch.cat((generated, next_id), dim=1)
+        return generated
+
     def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         return next_token_cross_entropy(self(inputs), targets)
