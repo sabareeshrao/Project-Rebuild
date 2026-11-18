@@ -312,3 +312,35 @@ context-dependent training task.
 untied output embeddings, and separate Q/K/V projections.
 These are intentional learning simplifications; the final model
 does not yet match nanoGPT checkpoint parameter names and layouts.
+
+## Toward nanoGPT fidelity (commits 051–055)
+
+These lessons add **tied token/output embedding weights**, GPT-style
+normal weight initialization (with depth-scaled residual projections),
+packed QKV projection, batched causal multi-head attention, and an
+optional attention implementation switch.
+
+```text
+GPTConfig(..., tie_embeddings=True, attention_impl="educational")
+GPTConfig(..., tie_embeddings=True, attention_impl="fused")
+```
+
+The default remains the original readable attention implementation,
+so the separate-head learning exercises still work. Choose `"fused"`
+to use a single `c_attn` per block and batched attention scores.
+The fused variant includes QKV biases, so parameter counts differ
+slightly. Neither mode is guaranteed to load upstream nanoGPT weights
+yet: module names, state-dict structure and config details differ.
+
+```bash
+python examples/48_weight_tying.py
+python examples/49_gpt_initialization.py
+python examples/50_fused_qkv.py
+python examples/51_fused_causal_attention.py
+python examples/52_compare_gpt_attention.py
+python -m pytest
+```
+
+Read `lessons/48_weight_tying.md` through
+`lessons/52_compare_gpt_attention.md` for the exact equations,
+weight-layout differences, reproducible experiments, and tests.

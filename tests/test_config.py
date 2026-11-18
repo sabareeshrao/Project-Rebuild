@@ -35,3 +35,10 @@ def test_tying_flag_must_be_boolean():
     assert GPTConfig(10, 4, 8, 2, 2).tie_embeddings is True
     with pytest.raises(ValueError, match="tie_embeddings"):
         GPTConfig(10, 4, 8, 2, 2, tie_embeddings=1)
+
+
+def test_attention_implementation_is_validated():
+    assert GPTConfig(10, 4, 8, 2, 2).attention_impl == "educational"
+    assert GPTConfig(10, 4, 8, 2, 2, attention_impl="fused").attention_impl == "fused"
+    with pytest.raises(ValueError, match="attention_impl"):
+        GPTConfig(10, 4, 8, 2, 2, attention_impl="unknown")

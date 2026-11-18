@@ -21,7 +21,8 @@ class GPTLanguageModel(nn.Module):
         self.positions = PositionEmbedding(config.block_size, config.n_embd)
         self.input_dropout = nn.Dropout(config.dropout)
         self.blocks = TransformerStack(
-            config.n_embd, config.n_head, config.n_layer, config.dropout
+            config.n_embd, config.n_head, config.n_layer, config.dropout,
+            attention_impl=config.attention_impl
         )
         self.final_norm = FeatureLayerNorm(config.n_embd)
         self.head = VocabularyProjection(config.n_embd, config.vocab_size)
