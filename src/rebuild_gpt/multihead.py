@@ -24,8 +24,10 @@ class ParallelAttentionHeads(nn.Module):
 class MultiHeadAttention(nn.Module):
     """Project concatenated causal heads back into the model's C features."""
 
-    def __init__(self, n_embd: int, n_head: int) -> None:
+    def __init__(self, n_embd: int, n_head: int, dropout: float = 0.0) -> None:
         super().__init__()
+        if not 0.0 <= dropout <= 1.0:
+            raise ValueError("dropout must be between 0 and 1")
         if n_embd < 1 or n_head < 1 or n_embd % n_head != 0:
             raise ValueError("n_embd must be positive and divisible by positive n_head")
         self.n_embd = n_embd
@@ -33,6 +35,7 @@ class MultiHeadAttention(nn.Module):
         self.head_size = n_embd // n_head
         self.heads = ParallelAttentionHeads(n_embd, n_head, self.head_size)
         self.projection = nn.Linear(n_embd, n_embd)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        return self.projection(self.heads(hidden))
+        return self.dropout(self.projection(self.heads(hidden)))

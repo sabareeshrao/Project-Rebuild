@@ -61,3 +61,30 @@ def test_multihead_projection_stays_causal():
     changed = hidden.clone()
     changed[:, -2:] *= 50
     assert torch.allclose(layer(hidden)[:, :3], layer(changed)[:, :3], atol=1e-6)
+
+
+def test_output_dropout_only_applies_in_training_mode():
+    torch.manual_seed(7)
+    layer = MultiHeadAttention(n_embd=8, n_head=2, dropout=1.0)
+    hidden = torch.randn(2, 4, 8)
+    layer.train()
+    assert torch.count_nonzero(layer(hidden)) == 0
+    layer.eval()
+    expected = layer.projection(layer.heads(hidden))
+    assert torch.allclose(layer(hidden), expected)
+    assert torch.count_nonzero(expected) > 0
+
+
+def test_output_dropout_zero_is_identity_in_both_modes():
+    layer = MultiHeadAttention(6, 3, dropout=0.0)
+    hidden = torch.randn(1, 4, 6)
+    layer.train()
+    before = layer(hidden)
+    layer.eval()
+    assert torch.allclose(layer(hidden), before)
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.1, float("nan")])
+def test_multihead_rejects_invalid_dropout_rates(rate):
+    with pytest.raises(ValueError, match="dropout"):
+        MultiHeadAttention(6, 2, dropout=rate)
