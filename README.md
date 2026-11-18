@@ -25,3 +25,15 @@ Understand how a GPT language model works by implementing each concept ourselves
 ## Attribution
 
 This independent educational project is inspired by [karpathy/nanoGPT](https://github.com/karpathy/nanoGPT). We will not pretend our commits are the upstream project's historical commits.
+
+## Local setup
+
+Requires Python 3.10+.
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows PowerShell: .venv\\Scripts\\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+PyTorch is an explicit project dependency; a GPU is **not** required for the first lessons.
