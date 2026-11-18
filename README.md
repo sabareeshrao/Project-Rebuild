@@ -93,3 +93,22 @@ The toy baselines have **no learned neural-network weights**. We use
 training data only to estimate unigram frequencies, then compare both
 baselines on the same held-out batch. Read lessons 08–12 in `lessons/`
 for equations, experiments, and understanding checkpoints.
+
+## First trainable language model (commits 016–020)
+
+The `BigramLanguageModel` learns a `[V,V]` next-token lookup table.
+These lessons introduce the first **learnable weights**, gradient updates
+with AdamW, autoregressive token sampling, and an end-to-end training
+exercise. This is a pedagogical bigram model, **not yet a transformer**.
+
+```bash
+python examples/13_bigram_lookup.py
+python examples/14_bigram_loss.py
+python examples/15_train_step.py
+python examples/16_generate.py
+python examples/17_train_bigram.py
+python -m pytest
+```
+
+Read `lessons/13_bigram_lookup.md` through
+`lessons/17_train_bigram.md` before proceeding to vector embeddings.
