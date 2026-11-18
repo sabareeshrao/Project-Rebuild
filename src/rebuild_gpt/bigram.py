@@ -1,0 +1,23 @@
+"""A minimal, learnable bigram language model."""
+
+import torch
+from torch import nn
+
+
+class BigramLanguageModel(nn.Module):
+    """Predict the next-token logits using only the current token's ID."""
+
+    def __init__(self, vocab_size: int) -> None:
+        super().__init__()
+        if vocab_size < 2:
+            raise ValueError("vocab_size must be at least 2")
+        self.vocab_size = vocab_size
+        self.token_to_logits = nn.Embedding(vocab_size, vocab_size)
+
+    def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """Map token IDs [B, T] to a separate score for each next token [B, T, V]."""
+        if token_ids.ndim != 2 or token_ids.numel() == 0 or token_ids.dtype != torch.long:
+            raise ValueError("token_ids must be a non-empty [batch, time] long tensor")
+        if (token_ids < 0).any() or (token_ids >= self.vocab_size).any():
+            raise ValueError("token ID outside vocabulary")
+        return self.token_to_logits(token_ids)
