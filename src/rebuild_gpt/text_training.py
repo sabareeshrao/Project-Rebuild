@@ -12,6 +12,7 @@ from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
 from rebuild_gpt.devices import resolve_device
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.optimizers import configure_adamw
+from rebuild_gpt.precision import autocast_context, make_grad_scaler, resolve_precision
 from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
@@ -48,6 +49,7 @@ def train_char_gpt(
     resume_from: str | Path | None = None,
     training_state_path: str | Path | None = None,
     device: str = "cpu",
+    precision: str = "fp32",
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -95,6 +97,11 @@ def train_char_gpt(
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
     compute_device = resolve_device(device)
+    resolve_precision(compute_device, precision)
+    # Until the next checkpoint lesson, avoid silently dropping GradScaler
+    # state when an fp16 run requests resumable training.
+    if precision == "fp16" and (resume_from is not None or training_state_path is not None):
+        raise ValueError("fp16 resumable checkpoints require scaler-state support")
     if history is not None:
         history.clear()
 
@@ -133,6 +140,8 @@ def train_char_gpt(
     # additional control. CUDA checkpoints explicitly record the backend.
     if compute_device.type != "cpu":
         controls["device"] = str(compute_device)
+    if precision != "fp32":
+        controls["precision"] = precision
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
@@ -143,6 +152,7 @@ def train_char_gpt(
         )
         if grouped_adamw else torch.optim.AdamW(model.parameters(), lr=learning_rate)
     )
+    scaler = make_grad_scaler(compute_device, precision)
     training_rng = torch.Generator().manual_seed(seed)
     val_x, val_y = sample_batch(
         validation, batch_size=batch_size, block_size=block_size,
@@ -179,7 +189,7 @@ def train_char_gpt(
 
     if saved is None:
         model.eval()
-        with torch.no_grad():
+        with torch.no_grad(), autocast_context(compute_device, precision):
             before = (
                 full_corpus_loss(model, validation, block_size=block_size)
                 if validation_mode == "full" else model.loss(val_x, val_y).item()
@@ -188,15 +198,16 @@ def train_char_gpt(
         before = saved["validation_before"]
 
     def record_evaluation(step: int) -> None:
-        scores = (
-            full_train_val_loss(model, train, validation, block_size=block_size)
-            if validation_mode == "full"
-            else estimate_train_val_loss(
-                model, train, validation,
-                batch_size=batch_size, block_size=block_size,
-                eval_batches=eval_batches, seed=seed + 2,
+        with autocast_context(compute_device, precision):
+            scores = (
+                full_train_val_loss(model, train, validation, block_size=block_size)
+                if validation_mode == "full"
+                else estimate_train_val_loss(
+                    model, train, validation,
+                    batch_size=batch_size, block_size=block_size,
+                    eval_batches=eval_batches, seed=seed + 2,
+                )
             )
-        )
         if history is not None:
             history.append({"step": step, **scores})
         if tracker is not None and tracker.consider(model, step, scores["validation_loss"]):
@@ -229,10 +240,12 @@ def train_char_gpt(
             inputs, targets = microbatches[0]
             last_loss = train_step(
                 model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
+                precision=precision, scaler=scaler,
             )
         else:
             last_loss = train_accumulated_step(
                 model, optimizer, microbatches, max_grad_norm=max_grad_norm,
+                precision=precision, scaler=scaler,
             )
         if eval_interval is not None and (step % eval_interval == 0 or step == steps):
             record_evaluation(step)
@@ -255,7 +268,7 @@ def train_char_gpt(
         assert tracker is not None
         tracker.restore(model)
     model.eval()
-    with torch.no_grad():
+    with torch.no_grad(), autocast_context(compute_device, precision):
         after = (
             full_corpus_loss(model, validation, block_size=block_size)
             if validation_mode == "full" else model.loss(val_x, val_y).item()
