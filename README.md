@@ -277,3 +277,38 @@ whether attention can use an earlier token to predict the next one.
 **Not yet original nanoGPT:** We use a single readable block and
 separate attention heads. Stacking blocks, efficiency improvements,
 training infrastructure, and checkpoint compatibility come later.
+
+## Stacked GPT architecture (commits 046–050)
+
+We now have a configurable **multi-block decoder-only GPT** built
+from our previous lessons, without changing the earlier one-block
+model. Each transformer block has its own learnable parameters.
+
+```text
+tokens [B,T] -> token/position embeddings [B,T,C]
+             -> n_layer transformer blocks [B,T,C]
+             -> final LayerNorm -> logits [B,T,V]
+             -> next-token cross-entropy + AdamW
+```
+
+Run the five new lessons:
+
+```bash
+python examples/43_transformer_stack.py
+python examples/44_gpt_config.py
+python examples/45_stacked_gpt.py
+python examples/46_count_parameters.py
+python examples/47_train_stacked_gpt.py
+python -m pytest
+```
+
+Read `lessons/43_transformer_stack.md` through
+`lessons/47_train_stacked_gpt.md`. Tests cover separate block
+parameters, configuration validation, parameter counts, gradient
+flow, **prefix causality through several blocks**, and a tiny
+context-dependent training task.
+
+**Compatibility note:** Our readable architecture currently uses
+untied output embeddings, and separate Q/K/V projections.
+These are intentional learning simplifications; the final model
+does not yet match nanoGPT checkpoint parameter names and layouts.
