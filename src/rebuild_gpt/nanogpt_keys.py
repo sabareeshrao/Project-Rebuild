@@ -40,8 +40,8 @@ def upstream_key(local_name: str) -> str:
 
 
 def _key_pairs(model: GPTLanguageModel) -> dict[str, str]:
-    if model.config.attention_impl != "fused" or not model.config.tie_embeddings:
-        raise ValueError("nanoGPT key mapping requires fused attention and tied embeddings")
+    if model.config.attention_impl not in ("fused", "sdpa") or not model.config.tie_embeddings:
+        raise ValueError("nanoGPT key mapping requires fused/SDPA attention and tied embeddings")
     return {name: upstream_key(name) for name in model.state_dict()}
 
 

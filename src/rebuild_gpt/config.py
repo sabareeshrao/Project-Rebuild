@@ -25,10 +25,10 @@ class GPTConfig:
             raise ValueError("tie_embeddings must be a boolean")
         if type(self.bias) is not bool:
             raise ValueError("bias must be a boolean")
-        if not self.bias and self.attention_impl != "fused":
-            raise ValueError("bias=False requires fused attention")
-        if self.attention_impl not in ("educational", "fused"):
-            raise ValueError("attention_impl must be educational or fused")
+        if not self.bias and self.attention_impl not in ("fused", "sdpa"):
+            raise ValueError("bias=False requires fused or sdpa attention")
+        if self.attention_impl not in ("educational", "fused", "sdpa"):
+            raise ValueError("attention_impl must be educational, fused, or sdpa")
         if self.n_embd % self.n_head != 0:
             raise ValueError("n_embd must be divisible by n_head")
         if not isinstance(self.dropout, (int, float)) or not math.isfinite(self.dropout) or not 0.0 <= self.dropout <= 1.0:

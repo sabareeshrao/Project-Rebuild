@@ -16,11 +16,13 @@ class TransformerBlock(nn.Module):
                  attention_impl: str = "educational", bias: bool = True) -> None:
         super().__init__()
         self.ln1 = FeatureLayerNorm(n_embd, bias=bias)
-        if attention_impl not in ("educational", "fused"):
-            raise ValueError("attention_impl must be educational or fused")
+        if attention_impl not in ("educational", "fused", "sdpa"):
+            raise ValueError("attention_impl must be educational, fused, or sdpa")
         self.attention = (MultiHeadAttention(n_embd, n_head, dropout=dropout)
                           if attention_impl == "educational"
-                          else FusedCausalSelfAttention(n_embd, n_head, dropout=dropout, bias=bias))
+                          else FusedCausalSelfAttention(
+                              n_embd, n_head, dropout=dropout, bias=bias,
+                              use_sdpa=(attention_impl == "sdpa")))
         self.ln2 = FeatureLayerNorm(n_embd, bias=bias)
         self.mlp = FeedForward(n_embd, dropout=dropout, bias=bias)
 
