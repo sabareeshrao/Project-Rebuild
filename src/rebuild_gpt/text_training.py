@@ -1,0 +1,78 @@
+"""Train a tiny character-level GPT directly from a UTF-8 corpus."""
+
+import math
+from pathlib import Path
+
+import torch
+
+from rebuild_gpt.config import GPTConfig
+from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
+from rebuild_gpt.gpt import GPTLanguageModel
+from rebuild_gpt.tokenizer import CharTokenizer
+from rebuild_gpt.training import train_step
+
+
+def train_char_gpt(
+    corpus_path: str | Path,
+    *,
+    steps: int = 60,
+    block_size: int = 8,
+    n_embd: int = 16,
+    n_head: int = 4,
+    n_layer: int = 2,
+    batch_size: int = 8,
+    learning_rate: float = 0.02,
+    seed: int = 7,
+) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
+    """Train on contiguous corpus tokens and report fixed-batch validation loss.
+
+    This is a small CPU-oriented learning exercise, not a production trainer.
+    """
+    if type(steps) is not int or steps < 1:
+        raise ValueError("steps must be a positive integer")
+    if type(batch_size) is not int or batch_size < 1:
+        raise ValueError("batch_size must be a positive integer")
+    if isinstance(learning_rate, bool) or not isinstance(learning_rate, (float, int)) or not math.isfinite(learning_rate) or learning_rate <= 0:
+        raise ValueError("learning_rate must be finite and positive")
+    if type(seed) is not int or seed < 0:
+        raise ValueError("seed must be a nonnegative integer")
+
+    tokens, tokenizer = load_corpus(corpus_path)
+    train, validation = split_train_val(tokens, val_fraction=0.2)
+    config = GPTConfig(
+        vocab_size=tokenizer.vocab_size,
+        block_size=block_size,
+        n_embd=n_embd, n_head=n_head, n_layer=n_layer,
+        attention_impl="fused",
+    )
+    if len(train) <= block_size or len(validation) <= block_size:
+        raise ValueError("Corpus is too short for block_size in train/validation")
+
+    torch.manual_seed(seed)
+    model = GPTLanguageModel(config)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    training_rng = torch.Generator().manual_seed(seed)
+    val_x, val_y = sample_batch(
+        validation, batch_size=batch_size, block_size=block_size,
+        generator=torch.Generator().manual_seed(seed + 1),
+    )
+
+    model.eval()
+    with torch.no_grad():
+        before = model.loss(val_x, val_y).item()
+    last_loss = float("nan")
+    for _ in range(steps):
+        inputs, targets = sample_batch(
+            train, batch_size=batch_size, block_size=block_size,
+            generator=training_rng,
+        )
+        last_loss = train_step(model, optimizer, inputs, targets)
+
+    model.eval()
+    with torch.no_grad():
+        after = model.loss(val_x, val_y).item()
+    return model, tokenizer, {
+        "train_loss_last": last_loss,
+        "validation_before": before,
+        "validation_after": after,
+    }
