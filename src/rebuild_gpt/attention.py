@@ -41,3 +41,15 @@ def scaled_dot_scores(queries: torch.Tensor, keys: torch.Tensor) -> torch.Tensor
     """Scale pairwise dot products by inverse sqrt of query/key width."""
     scores = pairwise_dot_scores(queries, keys)
     return scores * (queries.size(-1) ** -0.5)
+
+
+def causal_mask_scores(scores: torch.Tensor) -> torch.Tensor:
+    """Block future keys by replacing upper-triangle logits with -inf."""
+    if (
+        scores.ndim != 3 or scores.numel() == 0
+        or not scores.is_floating_point() or scores.size(-2) != scores.size(-1)
+    ):
+        raise ValueError("scores must be floating-point square [B,T,T]")
+    time = scores.size(-1)
+    future = torch.ones(time, time, dtype=torch.bool, device=scores.device).triu(1)
+    return scores.masked_fill(future, float("-inf"))

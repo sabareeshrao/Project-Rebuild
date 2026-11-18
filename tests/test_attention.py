@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from rebuild_gpt.attention import QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores
+from rebuild_gpt.attention import QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -66,3 +66,19 @@ def test_scaling_matches_pytorch_float_and_can_backpropagate():
     assert torch.allclose(scored, torch.matmul(q, k.transpose(-2, -1)) / 2)
     scored.sum().backward()
     assert q.grad is not None and k.grad is not None
+
+
+def test_causal_mask_preserves_past_and_self_but_blocks_future():
+    scores = torch.arange(9, dtype=torch.float32).reshape(1, 3, 3)
+    masked = causal_mask_scores(scores)
+    expected = torch.tensor([[[0., -torch.inf, -torch.inf],
+                              [3., 4., -torch.inf],
+                              [6., 7., 8.]]])
+    assert torch.equal(masked, expected)
+    assert torch.equal(scores, torch.arange(9, dtype=torch.float32).reshape(1, 3, 3))
+
+
+@pytest.mark.parametrize("shape", [(3, 3), (1, 2, 3), (1, 0, 0)])
+def test_causal_mask_rejects_invalid_shapes(shape):
+    with pytest.raises(ValueError, match="square"):
+        causal_mask_scores(torch.zeros(shape))
