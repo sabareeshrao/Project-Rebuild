@@ -27,7 +27,11 @@ def estimate_split_loss(
     if block_size > model.config.block_size:
         raise ValueError("block_size exceeds the model context window")
 
-    generator = torch.Generator(device=tokens.device).manual_seed(seed)
+    # Keep the sampling stream on CPU, even when the model is on CUDA.
+    # This avoids tying sampled indices to the device's RNG implementation.
+    cpu_tokens = tokens.cpu()
+    device = next(model.parameters()).device
+    generator = torch.Generator(device="cpu").manual_seed(seed)
     was_training = model.training
     try:
         model.eval()
@@ -35,10 +39,10 @@ def estimate_split_loss(
             losses = []
             for _ in range(eval_batches):
                 inputs, targets = sample_batch(
-                    tokens, batch_size=batch_size, block_size=block_size,
+                    cpu_tokens, batch_size=batch_size, block_size=block_size,
                     generator=generator,
                 )
-                losses.append(model.loss(inputs, targets).item())
+                losses.append(model.loss(inputs.to(device), targets.to(device)).item())
         return sum(losses) / len(losses)
     finally:
         model.train(was_training)

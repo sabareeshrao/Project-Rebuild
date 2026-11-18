@@ -49,3 +49,28 @@ def test_evaluation_restores_training_mode_on_bad_stream():
     with pytest.raises(ValueError, match="block_size"):
         estimate_split_loss(model, torch.tensor([0, 1]), batch_size=2, block_size=3)
     assert model.training
+
+
+def test_cpu_token_stream_can_be_evaluated_against_model_device():
+    net = make_model().to("cpu")
+    tokens = torch.tensor([0, 1, 2] * 30, dtype=torch.long)
+    loss = estimate_split_loss(
+        net, tokens, batch_size=3, block_size=4, eval_batches=2, seed=12
+    )
+    assert isinstance(loss, float) and loss > 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+def test_cpu_token_stream_can_evaluate_cuda_model_without_rng_leak():
+    net = make_model().to("cuda").train()
+    tokens = torch.tensor([0, 1, 2] * 30)
+    before = torch.get_rng_state().clone()
+    loss_a = estimate_split_loss(
+        net, tokens, batch_size=3, block_size=4, eval_batches=2, seed=12
+    )
+    loss_b = estimate_split_loss(
+        net, tokens, batch_size=3, block_size=4, eval_batches=2, seed=12
+    )
+    assert loss_a == loss_b
+    assert net.training
+    assert torch.equal(before, torch.get_rng_state())
