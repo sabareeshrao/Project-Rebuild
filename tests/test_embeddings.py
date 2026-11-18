@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch import nn
 
-from rebuild_gpt.embeddings import TokenEmbedding, VocabularyProjection
+from rebuild_gpt.embeddings import TokenEmbedding, VocabularyProjection, PositionEmbedding
 
 
 def test_tokens_become_vectors_without_losing_batch_time():
@@ -52,3 +52,19 @@ def test_vocab_projection_rejects_wrong_feature_count():
     head = VocabularyProjection(3, 5)
     with pytest.raises(ValueError, match="n_embd"):
         head(torch.zeros(2, 4, 2))
+
+
+def test_position_embedding_gives_each_index_its_own_vector():
+    position = PositionEmbedding(block_size=6, n_embd=3)
+    with torch.no_grad():
+        position.lookup.weight.copy_(torch.arange(18).reshape(6, 3).float())
+    vectors = position(3)
+    assert vectors.shape == (3, 3)
+    assert torch.equal(vectors[0], torch.tensor([0.0, 1.0, 2.0]))
+    assert torch.equal(vectors[2], torch.tensor([6.0, 7.0, 8.0]))
+
+
+@pytest.mark.parametrize("length", [0, 5, -1])
+def test_position_embedding_rejects_invalid_context_length(length):
+    with pytest.raises(ValueError, match="block_size"):
+        PositionEmbedding(4, 3)(length)

@@ -40,3 +40,20 @@ class VocabularyProjection(nn.Module):
         ):
             raise ValueError("hidden must be floating-point [batch, time, n_embd]")
         return self.linear(hidden)
+
+
+class PositionEmbedding(nn.Module):
+    """Learn a separate vector for each absolute context position."""
+
+    def __init__(self, block_size: int, n_embd: int) -> None:
+        super().__init__()
+        if block_size < 1 or n_embd < 1:
+            raise ValueError("block_size and n_embd must be positive")
+        self.block_size = block_size
+        self.lookup = nn.Embedding(block_size, n_embd)
+
+    def forward(self, length: int, *, device: torch.device | str | None = None) -> torch.Tensor:
+        if not 1 <= length <= self.block_size:
+            raise ValueError("length must be between 1 and block_size")
+        positions = torch.arange(length, dtype=torch.long, device=device)
+        return self.lookup(positions)  # [T, C], broadcast later across B
