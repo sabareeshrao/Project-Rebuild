@@ -9,6 +9,7 @@ from rebuild_gpt.best_model import BestValidationModel
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
+from rebuild_gpt.devices import resolve_device
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.optimizers import configure_adamw
 from rebuild_gpt.schedule import cosine_warmup_lr
@@ -46,6 +47,7 @@ def train_char_gpt(
     gradient_accumulation_steps: int = 1,
     resume_from: str | Path | None = None,
     training_state_path: str | Path | None = None,
+    device: str = "cpu",
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -92,6 +94,7 @@ def train_char_gpt(
         raise ValueError("grouped_adamw must be boolean")
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
+    compute_device = resolve_device(device)
     if history is not None:
         history.clear()
 
@@ -126,12 +129,17 @@ def train_char_gpt(
         "track_best": bool(restore_best or best_checkpoint_path is not None),
     }
 
+    # Keep pre-existing CPU checkpoints compatible: for CPU there is no
+    # additional control. CUDA checkpoints explicitly record the backend.
+    if compute_device.type != "cpu":
+        controls["device"] = str(compute_device)
+
     torch.manual_seed(seed)
-    model = GPTLanguageModel(config)
+    model = GPTLanguageModel(config).to(compute_device)
     optimizer = (
         configure_adamw(
             model, learning_rate=learning_rate, weight_decay=weight_decay,
-            betas=adam_betas, device_type="cpu",
+            betas=adam_betas, device_type=compute_device.type,
         )
         if grouped_adamw else torch.optim.AdamW(model.parameters(), lr=learning_rate)
     )
@@ -140,6 +148,7 @@ def train_char_gpt(
         validation, batch_size=batch_size, block_size=block_size,
         generator=torch.Generator().manual_seed(seed + 1),
     )
+    val_x, val_y = val_x.to(compute_device), val_y.to(compute_device)
 
     tracker = BestValidationModel() if (restore_best or best_checkpoint_path is not None) else None
     saved = None
@@ -197,13 +206,13 @@ def train_char_gpt(
         saved["last_learning_rate"] if saved is not None else float(learning_rate)
     )
     for step in range(start_step + 1, steps + 1):
-        microbatches = [
-            sample_batch(
+        microbatches = []
+        for _ in range(gradient_accumulation_steps):
+            inputs, targets = sample_batch(
                 train, batch_size=batch_size, block_size=block_size,
                 generator=training_rng,
             )
-            for _ in range(gradient_accumulation_steps)
-        ]
+            microbatches.append((inputs.to(compute_device), targets.to(compute_device)))
         if lr_decay_steps is not None:
             last_learning_rate = cosine_warmup_lr(
                 step - 1, max_lr=learning_rate, min_lr=min_lr,
