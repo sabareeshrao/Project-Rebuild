@@ -3,7 +3,7 @@ import math
 import pytest
 import torch
 
-from rebuild_gpt.attention import QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
+from rebuild_gpt.attention import CausalAttentionWeights, QueryKeyProjection, pairwise_dot_scores, scaled_dot_scores, causal_mask_scores
 
 
 def test_pairwise_dot_scores_match_hand_calculated_values():
@@ -82,3 +82,34 @@ def test_causal_mask_preserves_past_and_self_but_blocks_future():
 def test_causal_mask_rejects_invalid_shapes(shape):
     with pytest.raises(ValueError, match="square"):
         causal_mask_scores(torch.zeros(shape))
+
+
+def test_attention_weights_are_normalized_causal_and_batched():
+    torch.manual_seed(4)
+    layer = CausalAttentionWeights(n_embd=6, head_size=3)
+    hidden = torch.randn(2, 4, 6)
+    weights = layer(hidden)
+    assert weights.shape == (2, 4, 4)
+    assert torch.allclose(weights.sum(dim=-1), torch.ones(2, 4))
+    assert torch.count_nonzero(torch.triu(weights, diagonal=1)) == 0
+    assert torch.equal(weights[:, 0, 0], torch.ones(2))
+
+
+def test_attention_weights_for_prefix_ignore_future_tokens():
+    torch.manual_seed(6)
+    layer = CausalAttentionWeights(n_embd=4, head_size=2)
+    hidden = torch.randn(1, 5, 4)
+    other = hidden.clone()
+    other[:, 3:, :] = torch.randn_like(other[:, 3:, :])
+    assert torch.allclose(layer(hidden)[:, :3, :3], layer(other)[:, :3, :3])
+
+
+def test_attention_weights_backpropagate_to_query_and_key():
+    torch.manual_seed(8)
+    layer = CausalAttentionWeights(4, 3)
+    hidden = torch.randn(1, 4, 4, requires_grad=True)
+    weights = layer(hidden)
+    weights[:, -1, 0].sum().backward()
+    assert hidden.grad is not None
+    assert layer.projections.query.weight.grad is not None
+    assert layer.projections.key.weight.grad is not None

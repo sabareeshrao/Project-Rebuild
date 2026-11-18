@@ -142,3 +142,33 @@ Read `lessons/18_token_embeddings.md` through
 `lessons/22_train_embedding_model.md`. **Important:** this model cannot
 yet condition on *previous* tokens. Causal self-attention is the next
 architectural milestone.
+
+## Query-key mathematics (commits 026–030)
+
+We now have a trainable **causal attention-weight calculator**.
+These lessons introduce dot products, separate query and key
+projections, inverse-square-root scaling, a future-token mask,
+and row-wise softmax.
+
+```text
+hidden [B,T,C] -> Q,K [B,T,D] -> Q @ K.T [B,T,T]
+               -> scale -> causal mask -> softmax -> weights [B,T,T]
+```
+
+Run:
+
+```bash
+python examples/23_pairwise_dot_scores.py
+python examples/24_learned_queries_keys.py
+python examples/25_scaled_dot_scores.py
+python examples/26_causal_mask.py
+python examples/27_causal_attention_weights.py
+python -m pytest
+```
+
+Read `lessons/23_pairwise_dot_scores.md` through
+`lessons/27_causal_attention_weights.md`.
+
+**Not a full attention head yet:** we have not projected value vectors
+or computed the weighted aggregation `weights @ values`. Those are
+the next lessons on our path toward nanoGPT.

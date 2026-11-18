@@ -3,6 +3,8 @@
 import torch
 from torch import nn
 
+from rebuild_gpt.probability import stable_softmax
+
 
 def pairwise_dot_scores(queries: torch.Tensor, keys: torch.Tensor) -> torch.Tensor:
     """Match each query with each key: [B,T,D] x [B,S,D] -> [B,T,S]."""
@@ -53,3 +55,16 @@ def causal_mask_scores(scores: torch.Tensor) -> torch.Tensor:
     time = scores.size(-1)
     future = torch.ones(time, time, dtype=torch.bool, device=scores.device).triu(1)
     return scores.masked_fill(future, float("-inf"))
+
+
+class CausalAttentionWeights(nn.Module):
+    """Produce causal query-key mixing weights, before applying values."""
+
+    def __init__(self, n_embd: int, head_size: int) -> None:
+        super().__init__()
+        self.projections = QueryKeyProjection(n_embd, head_size)
+
+    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
+        queries, keys = self.projections(hidden)
+        scores = scaled_dot_scores(queries, keys)
+        return stable_softmax(causal_mask_scores(scores))
