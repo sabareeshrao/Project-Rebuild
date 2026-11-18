@@ -624,3 +624,16 @@ with different data, tokenizer, model configuration or training controls
 fails rather than silently starting a different experiment. Keep
 training-state files trusted: they are loaded via
 `torch.load(..., weights_only=True)`.
+
+The resumable training state is now written via a same-directory temporary
+file and `os.replace`, protecting the previous checkpoint from incomplete
+writes. To prove interrupted and uninterrupted training agree, run:
+
+```bash
+python examples/85_resume_text_gpt.py
+python -m pytest tests/test_text_resume.py tests/test_best_resume.py \
+  tests/test_text_training_resume.py tests/test_cli_resume.py -q
+```
+
+These lessons currently target **CPU** training; full CUDA RNG and
+mixed-precision scaler persistence remain future work.

@@ -6,7 +6,9 @@ contain neither optimizer state nor the random streams required for resuming.
 
 from dataclasses import asdict
 from hashlib import sha256
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 import torch
 
@@ -44,7 +46,7 @@ def save_text_training_state(
         raise ValueError("model vocabulary does not match tokenizer")
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({
+    payload = {
         "format_version": TEXT_TRAINING_STATE_VERSION,
         "config": asdict(model.config),
         "vocab": list(tokenizer.vocab),
@@ -60,7 +62,17 @@ def save_text_training_state(
         "last_loss": float(last_loss),
         "last_learning_rate": float(last_learning_rate),
         "best_state": best_state,
-    }, output)
+    }
+    # Never truncate a working resume point until the replacement is complete.
+    with NamedTemporaryFile(
+        dir=output.parent, prefix=f".{output.name}.", suffix=".tmp", delete=False
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        torch.save(payload, temporary_path)
+        os.replace(temporary_path, output)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def load_text_training_state(

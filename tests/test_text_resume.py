@@ -61,3 +61,29 @@ def test_resume_state_round_trip_and_setup_checks(tmp_path):
             path, model=model, tokenizer=ToyTokenizer(),
             corpus_path=corpus, controls=options,
         )
+
+
+def test_failed_save_does_not_destroy_last_good_resume_point(tmp_path, monkeypatch):
+    corpus = tmp_path / "text.txt"
+    corpus.write_text("ab" * 30, encoding="utf-8")
+    model = ToyModel()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.02)
+    generator = torch.Generator().manual_seed(8)
+    output = tmp_path / "train_state.pt"
+    kwargs = dict(
+        model=model, tokenizer=ToyTokenizer(), optimizer=optimizer,
+        corpus_path=corpus, controls={"seed": 8}, step=2,
+        batch_generator=generator, history=[], validation_before=1.0,
+        last_loss=0.7, last_learning_rate=0.02,
+    )
+    save_text_training_state(output, **kwargs)
+    known_good = output.read_bytes()
+
+    def fail_to_save(*args, **kwargs):
+        raise OSError("simulated interrupted write")
+
+    monkeypatch.setattr(torch, "save", fail_to_save)
+    with pytest.raises(OSError, match="interrupted"):
+        save_text_training_state(output, **kwargs)
+    assert output.read_bytes() == known_good
+    assert not list(tmp_path.glob(".train_state.pt.*.tmp"))
