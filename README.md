@@ -344,3 +344,40 @@ python -m pytest
 Read `lessons/48_weight_tying.md` through
 `lessons/52_compare_gpt_attention.md` for the exact equations,
 weight-layout differences, reproducible experiments, and tests.
+
+## Checkpoints and state-dict compatibility (commits 056–060)
+
+You can now inspect named tensors and shared parameters, save and
+strictly reload our **own** GPT checkpoints, resume single-process
+CPU AdamW training (including saved RNG states), and translate the
+fused model's tensor keys toward the **original nanoGPT** layout.
+
+```text
+Our fused GPT -> state_dict -> translate keys -> nanoGPT-style tensors
+                                      |
+                              import back to our GPT
+                                      |
+                              check identical logits
+```
+
+Run the five lessons:
+
+```bash
+python examples/53_inspect_state.py
+python examples/54_save_load_model.py
+python examples/55_resume_training.py
+python examples/56_nanogpt_keys.py
+python examples/57_checkpoint_parity.py
+python -m pytest
+```
+
+Read `lessons/53_inspect_state.md` through
+`lessons/57_checkpoint_parity.md`. Model checkpoints load on CPU
+using `weights_only=True`. Training checkpoints currently support
+standard AdamW and CPU RNG state.
+
+**Important limitation:** Tests verify self-consistent translation
+and faithful reloads of our own weights. We have **not yet loaded a
+real original nanoGPT checkpoint**, verified upstream optimizer
+compatibility, or implemented all upstream configuration variants.
+Use trusted checkpoint sources only.
