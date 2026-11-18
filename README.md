@@ -381,3 +381,34 @@ and faithful reloads of our own weights. We have **not yet loaded a
 real original nanoGPT checkpoint**, verified upstream optimizer
 compatibility, or implemented all upstream configuration variants.
 Use trusted checkpoint sources only.
+
+## Compare against original nanoGPT (commits 061–065)
+
+We added bias-free LayerNorm/MLP building blocks, a fused-GPT
+`bias` option, and `forward_nanogpt()` to reproduce the original
+inference/training logit and loss contract without changing the
+learning-first `forward()`.
+
+A strict parity helper can synchronize identical fused-GPT tensors
+into the original nanoGPT model and compare full logits, final-token
+logits, and ignored-target cross-entropy numerically. No upstream
+source is vendored into this repository.
+
+For a reproducible **opt-in** comparison, obtain and review the
+original `model.py` at upstream commit
+`3adf61e154c3fe3fca428ad6bc3818b27a3b8291`:
+
+```bash
+curl -L https://raw.githubusercontent.com/karpathy/nanoGPT/3adf61e154c3fe3fca428ad6bc3818b27a3b8291/model.py -o /tmp/original_nanogpt_model.py
+NANOGPT_MODEL_PY=/tmp/original_nanogpt_model.py python -m pytest tests/test_actual_nanogpt_parity.py -v
+python examples/59_compare_original_nanogpt.py --upstream-model /tmp/original_nanogpt_model.py
+python -m pytest
+```
+
+The optional integration tests **skip** when the environment variable
+is absent. Read `lessons/58_optional_bias.md` through
+`lessons/62_actual_nanogpt_parity.md` to understand the work.
+
+**Scope:** Reference tests use tiny CPU models with transferred
+synthetic weights, not downloaded GPT-2 checkpoint weights. Passing
+these tests does not establish full checkpoint compatibility.

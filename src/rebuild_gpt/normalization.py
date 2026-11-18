@@ -34,4 +34,5 @@ class FeatureLayerNorm(nn.Module):
     def forward(self, hidden: torch.Tensor) -> torch.Tensor:
         if hidden.ndim != 3 or hidden.size(-1) != self.n_embd:
             raise ValueError("hidden must have shape [B,T,n_embd]")
-        return normalize_features(hidden, self.eps) * self.weight + self.bias
+        normalized = normalize_features(hidden, self.eps) * self.weight
+        return normalized if self.bias is None else normalized + self.bias
