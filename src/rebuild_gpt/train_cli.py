@@ -12,6 +12,8 @@ from rebuild_gpt.text_training import train_char_gpt
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus", default="data/tiny_story.txt")
+    parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu",
+                        help="Where model computation runs (default: cpu)")
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-embd", type=int, default=16)
@@ -73,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             gradient_accumulation_steps=args.gradient_accumulation_steps,
             resume_from=args.resume_from,
             training_state_path=args.training_state,
+            device=args.device,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -81,6 +84,7 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "corpus": str(args.corpus),
         "seed": args.seed,
+        "requested_device": args.device,
         "model_config": asdict(model.config),
         "restored_best": args.restore_best,
         "target_steps": args.steps,

@@ -637,3 +637,24 @@ python -m pytest tests/test_text_resume.py tests/test_best_resume.py \
 
 These lessons currently target **CPU** training; full CUDA RNG and
 mixed-precision scaler persistence remain future work.
+
+## CPU/CUDA training (commits 096–100)
+
+The character-level GPT trainer supports `--device cpu|cuda|auto`.
+The default is `cpu`. `cuda` requires PyTorch CUDA support;
+`auto` selects CUDA if available and otherwise uses CPU.
+
+```bash
+python examples/86_device_training.py --device cpu
+python -m rebuild_gpt.train_cli --device auto --steps 2
+python -m pytest tests/test_devices.py tests/test_device_cli.py \
+  tests/test_text_training_devices.py tests/test_evaluation.py \
+  tests/test_text_resume.py -q
+```
+
+The original CPU data stream stays on CPU. Sampled training and
+evaluation windows transfer to the model device. CUDA training
+checkpoints retain CUDA RNG state for dropout, alongside the CPU RNG
+and batch-sampling generator. Resume requires compatible training
+controls and the same selected backend. Mixed precision and
+distributed training are not implemented yet.
