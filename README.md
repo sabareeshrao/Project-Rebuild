@@ -1520,3 +1520,48 @@ rather than writing a new successful report. Passing matched-weight
 tests demonstrates **implementation parity for the tested inputs**,
 not GPT-2-scale training equivalence or model quality.
 Read lessons 228–232 for detailed explanations and experiments.
+
+
+## Backward gradients and one-step AdamW parity (commits 240–244)
+
+Forward and generation parity are not the same as **training parity**.
+These five lessons compare gradients and **one identical plain PyTorch
+AdamW optimizer step** for matched weights and held-out tokens.
+
+```bash
+# Create a tiny GPT checkpoint if necessary:
+python examples/120_capstone_cli.py --steps 4
+
+# Local gradient snapshot (no original nanoGPT needed):
+python examples/126_gradient_snapshot.py
+
+# Opt-in genuine-upstream one-step comparison:
+sha256sum /trusted/nanoGPT/model.py
+python -m rebuild_gpt.training_parity_audit_cli \
+  --upstream-model /trusted/nanoGPT/model.py \
+  --upstream-sha256 <verified-64-character-sha256> \
+  --checkpoint out/capstone/model.pt \
+  --report out/capstone/adamw_parity.json
+
+# Local unit tests (the original nanoGPT file is not required):
+python -m pytest -q tests/test_training_parity_gradients.py \
+  tests/test_training_parity_comparison.py \
+  tests/test_training_parity_adamw.py \
+  tests/test_saved_training_parity.py \
+  tests/test_training_parity_audit.py
+
+# Optional true-upstream regression test, skipped without trusted source:
+NANOGPT_MODEL_PY=/trusted/nanoGPT/model.py \
+  python -m pytest -q tests/test_training_parity_opt_in.py
+```
+
+The audit records input/checkpoint/upstream source hashes and the
+maximum gradient and updated-weight errors. It reports success only
+after both checks pass. The experiment updates **in-memory copies**
+and leaves the saved checkpoint unchanged.
+
+**Scope limitation:** matching one common `torch.optim.AdamW` step
+does not validate original nanoGPT's optimizer parameter grouping,
+multi-step training trajectory, distributed execution, dropout RNG
+behavior, or GPT-2-scale model quality. Source import executes Python;
+provide only personally reviewed original code. Read lessons 233–237.
