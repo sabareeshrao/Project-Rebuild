@@ -15,8 +15,12 @@ from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.optimizers import configure_adamw
 from rebuild_gpt.precision import autocast_context, make_grad_scaler, resolve_precision
 from rebuild_gpt.schedule import cosine_warmup_lr
-from rebuild_gpt.evaluation import estimate_train_val_loss, evaluate_prepared_train_val_loss
+from rebuild_gpt.evaluation import (
+    estimate_train_val_loss, evaluate_prepared_train_val_loss,
+    evaluate_index_plan_train_val_loss,
+)
 from rebuild_gpt.eval_cache import prepare_train_val_evaluation_batches
+from rebuild_gpt.eval_index_plan import prepare_train_val_index_plans
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_resume import load_text_training_state, save_text_training_state
 from rebuild_gpt.tokenizer import CharTokenizer
@@ -102,12 +106,12 @@ def train_char_gpt(
         )
     if validation_mode not in ("sampled", "full"):
         raise ValueError("validation_mode must be sampled or full")
-    if eval_batch_backend not in ("regenerate", "cached"):
-        raise ValueError("eval_batch_backend must be regenerate or cached")
-    if eval_batch_backend == "cached" and validation_mode != "sampled":
-        raise ValueError("cached eval_batch_backend requires sampled validation_mode")
-    if eval_batch_backend == "cached" and eval_interval is None:
-        raise ValueError("cached eval_batch_backend requires eval_interval")
+    if eval_batch_backend not in ("regenerate", "cached", "indices"):
+        raise ValueError("eval_batch_backend must be regenerate, cached or indices")
+    if eval_batch_backend != "regenerate" and validation_mode != "sampled":
+        raise ValueError("cached or indices eval_batch_backend requires sampled validation_mode")
+    if eval_batch_backend != "regenerate" and eval_interval is None:
+        raise ValueError("cached or indices eval_batch_backend requires eval_interval")
     cache_max_bytes = None
     if eval_cache_max_mib is not None:
         if (
@@ -117,8 +121,8 @@ def train_char_gpt(
             or eval_cache_max_mib <= 0
         ):
             raise ValueError("eval_cache_max_mib must be finite and positive")
-        if eval_batch_backend != "cached":
-            raise ValueError("eval_cache_max_mib requires cached eval_batch_backend")
+        if eval_batch_backend == "regenerate":
+            raise ValueError("eval_cache_max_mib requires cached or indices eval_batch_backend")
         cache_max_bytes = int(eval_cache_max_mib * (1024 * 1024))
         if cache_max_bytes < 1:
             raise ValueError("eval_cache_max_mib must allow at least one byte")
@@ -260,6 +264,15 @@ def train_char_gpt(
         )
         if eval_batch_backend == "cached" else None
     )
+    index_evaluation = (
+        prepare_train_val_index_plans(
+            train, validation,
+            batch_size=batch_size, block_size=block_size,
+            eval_batches=eval_batches, seed=seed + 2,
+            max_bytes=cache_max_bytes,
+        )
+        if eval_batch_backend == "indices" else None
+    )
 
     tracker = BestValidationModel() if (restore_best or best_checkpoint_path is not None) else None
     saved = None
@@ -313,10 +326,16 @@ def train_char_gpt(
                         model, *prepared_evaluation,
                     )
                     if prepared_evaluation is not None
-                    else estimate_train_val_loss(
-                        model, train, validation,
-                        batch_size=batch_size, block_size=block_size,
-                        eval_batches=eval_batches, seed=seed + 2,
+                    else (
+                        evaluate_index_plan_train_val_loss(
+                            model, *index_evaluation,
+                        )
+                        if index_evaluation is not None
+                        else estimate_train_val_loss(
+                            model, train, validation,
+                            batch_size=batch_size, block_size=block_size,
+                            eval_batches=eval_batches, seed=seed + 2,
+                        )
                     )
                 )
             )
