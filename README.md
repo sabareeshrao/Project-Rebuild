@@ -1780,3 +1780,48 @@ These checks require a trusted manifest and trusted PyTorch checkpoint
 bytes. They are not a signature/authentication system and do not
 establish GPU or distributed training reproducibility. Read lessons
 258–262 for explanations, experiments and limitations.
+
+
+## Recovery evidence and disposable fault drill (commits 270–274)
+
+Continue the original nanoGPT-inspired rebuild with a *verifiable*
+recovery experiment. These five commits add strict recovery-audit
+validation, an independent content+state verifier, isolated
+fault-injection copies and an end-to-end fallback drill.
+
+```bash
+# First generate a small trusted multi-interruption run:
+python examples/150_multistage_resume_audit.py --stops 2,4
+
+# Read-only: parse and verify checkpoints from an existing recovery
+# (perform --mode recover once if you have not yet generated that audit).
+python -m rebuild_gpt.resume_recovery_cli --mode recover
+python -m rebuild_gpt.recovery_lab_cli \
+  --mode check --source-dir out/multistage_resume
+
+# Full disposable drill: copy the original run, corrupt only the copy
+# at the last intermediate stop, recover from an earlier one, then
+# independently verify the final checkpoint.
+python -m rebuild_gpt.recovery_lab_cli \
+  --mode drill --source-dir out/multistage_resume \
+  --drill-dir out/recovery_drill --damage-step 4
+
+# New CPU tests:
+python -m pytest -q \
+  tests/test_recovery_audit_schema.py \
+  tests/test_recovery_audit_verification.py \
+  tests/test_recovery_drill.py \
+  tests/test_recovery_drill_runner.py \
+  tests/test_recovery_lab_cli.py
+```
+
+`--mode check` deserializes trusted tensor checkpoints to independently
+compare the saved training state; it does not run optimizer steps.
+`--mode drill` deliberately retrains from an earlier verified
+checkpoint **in a new directory**, and fails if that directory already
+exists. Original artifact bytes remain untouched.
+
+A passing result establishes deterministic restart equivalence for
+these tested CPU fp32 settings, not checkpoint authenticity, proof
+against malicious local files, or GPU/distributed training parity.
+See lessons 263–267 for explanations and exercises.
