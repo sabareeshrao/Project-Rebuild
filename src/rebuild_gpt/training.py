@@ -6,6 +6,7 @@ from typing import Protocol
 import torch
 
 from rebuild_gpt.precision import autocast_context, resolve_precision
+from rebuild_gpt.microbatches import split_microbatches
 
 
 class TrainableLanguageModel(Protocol):
@@ -147,3 +148,34 @@ def train_accumulated_step(
         )
     _finish_optimizer_step(model, optimizer, max_grad_norm, scaler)
     return total_loss / len(microbatches) if same_size else total_loss
+
+
+def train_logical_batch_step(
+    model: TrainableLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    microbatch_size: int,
+    max_grad_norm: float | None = None,
+    precision: str = "fp32",
+    scaler: torch.cuda.amp.GradScaler | None = None,
+) -> float:
+    """Run one optimizer update from a possibly uneven logical batch.
+
+    This API retains every example in the logical batch and performs
+    no optimizer update between its microbatches. It assumes that the
+    model loss is a mean over individual target entries.
+    """
+    parts = split_microbatches(
+        inputs, targets, microbatch_size=microbatch_size,
+    )
+    if len(parts) == 1:
+        return train_step(
+            model, optimizer, *parts[0],
+            max_grad_norm=max_grad_norm, precision=precision, scaler=scaler,
+        )
+    return train_accumulated_step(
+        model, optimizer, parts, max_grad_norm=max_grad_norm,
+        precision=precision, scaler=scaler,
+    )
