@@ -83,6 +83,7 @@ def compare_grouped_adamw_trajectory(
     No model re-synchronization, optimizer re-creation or reseeding
     occurs between steps. Both models run with dropout disabled.
     """
+    from rebuild_gpt.adamw_state_parity import compare_adamw_moments
     from rebuild_gpt.training_parity import capture_upstream_named_gradients
     from rebuild_gpt.upstream_parity import synchronize_upstream_weights
 
@@ -189,10 +190,15 @@ def compare_grouped_adamw_trajectory(
                     weight_error,
                     (local_state[name] - reference_state[name]).abs().max().item(),
                 )
+            moment_errors = compare_adamw_moments(
+                ours, upstream, local_opt, reference_opt,
+                atol=atol, rtol=rtol,
+            )
             history.append({
                 "step": step, "loss": float(local_loss.detach()),
                 "max_gradient_error": gradient_error,
                 "max_updated_weight_error": weight_error,
+                **moment_errors,
             })
     finally:
         ours.train(previous_local_mode)
