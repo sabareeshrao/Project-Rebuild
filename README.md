@@ -1258,3 +1258,40 @@ a globally deduplicated count; use the new
 These are reproducible coverage diagnostics, not statistical
 independence tests or generalization guarantees. See lessons
 193–197 in `lessons/`.
+
+## Marginal validation coverage and retrospective goals (commits 204–208)
+
+The validation seed experiments now report **new token positions
+added by each seed**, positions already touched by earlier seeds,
+and overlap within each seed. The per-seed marginal gains sum to
+the globally distinct corpus positions touched by the full plan.
+
+An optional `--coverage-target` reports the first *preselected*
+seed prefix reaching a requested fraction of corpus positions,
+or the remaining shortfall if the target is not reached. It never
+adapts the selected seeds, alters training, or claims statistical
+confidence.
+
+```bash
+# Synthetic token-position coverage and target crossing:
+python examples/111_seed_coverage_sweep.py \
+  --corpus-tokens 1024 --seed-counts 1,2,4,8 \
+  --coverage-target 0.5 --sampling-policy all \
+  --json out/coverage_targets.json
+
+# Equivalent model-free coverage analysis on held-out UTF-8 text:
+python examples/112_heldout_seed_coverage.py \
+  --corpus data/tiny_story.txt --batch-size 4 --context 8 \
+  --seed-counts 1,2,4 --sampling-policy all \
+  --csv out/heldout_coverage.csv --json out/heldout_coverage.json
+
+python -m pytest tests/test_coverage_growth.py \
+  tests/test_marginal_coverage_report.py tests/test_coverage_targets.py \
+  tests/test_seed_coverage_targets_cli.py \
+  tests/test_heldout_seed_coverage.py -q
+```
+
+These statistics describe **coverage of one underlying corpus**.
+They are not effective sample sizes, model performance metrics,
+calibrated confidence bounds, or statistical stopping rules.
+See lessons 198–202 in `lessons/`.
