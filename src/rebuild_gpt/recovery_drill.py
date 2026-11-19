@@ -15,6 +15,7 @@ def prepare_recovery_drill(
     drill_dir: str | Path,
     *,
     damage_step: int,
+    damage_mode: str = "append",
 ) -> dict:
     """Copy verified artifacts, then corrupt ONE intermediate copy on purpose.
 
@@ -31,6 +32,8 @@ def prepare_recovery_drill(
     report = load_multistage_manifest(manifest)
     if type(damage_step) is not int or damage_step not in report["settings"]["stops"]:
         raise ValueError("damage_step must be a recorded intermediate stop")
+    if damage_mode not in ("append", "truncate", "remove"):
+        raise ValueError("damage_mode must be append, truncate or remove")
     # Verify the intact originals before creating ANY drill files.
     verify_multistage_artifacts(manifest, corpus_path)
     total = report["settings"]["total_steps"]
@@ -46,12 +49,19 @@ def prepare_recovery_drill(
         destination / "multistage_audit.json", corpus_path,
     )
     damaged = stage_checkpoint_path(destination, damage_step, total)
-    with damaged.open("ab") as file:
-        file.write(b"\nINTENTIONAL CORRUPTION FOR EDUCATIONAL TEST\n")
+    if damage_mode == "append":
+        with damaged.open("ab") as file:
+            file.write(b"\nINTENTIONAL CORRUPTION FOR EDUCATIONAL TEST\n")
+    elif damage_mode == "truncate":
+        with damaged.open("r+b") as file:
+            file.truncate(damaged.stat().st_size // 2)
+    else:
+        damaged.unlink()
     return {
         "status": "prepared",
         "original_directory": str(source),
         "drill_directory": str(destination),
         "damaged_checkpoint": str(damaged),
         "damage_step": damage_step,
+        "damage_mode": damage_mode,
     }
