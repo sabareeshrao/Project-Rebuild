@@ -18,6 +18,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="Computation dtype; fp16 needs CUDA and uses GradScaler")
     parser.add_argument("--attention-impl", choices=("fused", "sdpa"), default="fused",
                         help="Manual fused attention or PyTorch SDPA (default: fused)")
+    parser.add_argument("--sampling-backend", choices=("indexed", "cached"), default="indexed",
+                        help="Rebuild offsets per batch or reuse an unfold window view")
     parser.add_argument("--activation-checkpointing", action="store_true",
                         help="Recompute every transformer block during backward")
     parser.add_argument("--checkpoint-every-n", type=int, default=None,
@@ -103,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
             device=args.device,
             precision=args.precision,
             attention_impl=args.attention_impl,
+            sampling_backend=args.sampling_backend,
             activation_checkpointing=args.activation_checkpointing,
             checkpoint_every_n=args.checkpoint_every_n,
         )
@@ -132,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             "microbatch_size": args.microbatch_size,
             "pin_memory": args.pin_memory,
             "non_blocking_transfer": args.non_blocking_transfer,
+            "sampling_backend": args.sampling_backend,
             "grouped_adamw": args.grouped_adamw,
             "weight_decay": args.weight_decay if args.grouped_adamw else None,
             "adam_betas": [args.adam_beta1, args.adam_beta2] if args.grouped_adamw else None,

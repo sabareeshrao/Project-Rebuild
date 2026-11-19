@@ -20,6 +20,7 @@ from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_resume import load_text_training_state, save_text_training_state
 from rebuild_gpt.tokenizer import CharTokenizer
 from rebuild_gpt.training import train_accumulated_step, train_step, train_streamed_logical_batch_step
+from rebuild_gpt.window_sampler import CachedWindowSampler
 
 
 def train_char_gpt(
@@ -57,6 +58,7 @@ def train_char_gpt(
     attention_impl: str = "fused",
     activation_checkpointing: bool = False,
     checkpoint_every_n: int | None = None,
+    sampling_backend: str = "indexed",
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -118,6 +120,8 @@ def train_char_gpt(
         raise ValueError("weight_decay and adam_betas requires grouped_adamw")
     if attention_impl not in ("fused", "sdpa"):
         raise ValueError("attention_impl must be fused or sdpa for text training")
+    if sampling_backend not in ("indexed", "cached"):
+        raise ValueError("sampling_backend must be indexed or cached")
     if type(activation_checkpointing) is not bool:
         raise ValueError("activation_checkpointing must be boolean")
     if activation_checkpointing and checkpoint_every_n is not None:
@@ -179,6 +183,24 @@ def train_char_gpt(
         controls["pin_memory"] = True
     if non_blocking_transfer:
         controls["non_blocking_transfer"] = True
+    # Older default-indexed training states omit this option.
+    if sampling_backend != "indexed":
+        controls["sampling_backend"] = sampling_backend
+
+    train_sampler = (
+        CachedWindowSampler(train, block_size=block_size)
+        if sampling_backend == "cached" else None
+    )
+
+    def sample_training_batch() -> tuple[torch.Tensor, torch.Tensor]:
+        if train_sampler is not None:
+            return train_sampler.sample(
+                batch_size=batch_size, generator=training_rng,
+            )
+        return sample_batch(
+            train, batch_size=batch_size, block_size=block_size,
+            generator=training_rng,
+        )
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
@@ -272,17 +294,11 @@ def train_char_gpt(
         if microbatch_size is not None:
             # The logical batch stays on CPU until each slice reaches its
             # forward/backward pass. Preserve the original CPU RNG sampling.
-            inputs, targets = sample_batch(
-                train, batch_size=batch_size, block_size=block_size,
-                generator=training_rng,
-            )
+            inputs, targets = sample_training_batch()
         else:
             # Legacy behavior: B examples for each of A independent samples.
             for _ in range(gradient_accumulation_steps):
-                inputs, targets = sample_batch(
-                    train, batch_size=batch_size, block_size=block_size,
-                    generator=training_rng,
-                )
+                inputs, targets = sample_training_batch()
                 microbatches.append((inputs.to(compute_device), targets.to(compute_device)))
         if lr_decay_steps is not None:
             last_learning_rate = cosine_warmup_lr(
