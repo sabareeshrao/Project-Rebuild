@@ -14,6 +14,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-dir", default="out/multistage_resume")
     parser.add_argument("--drill-dir", default="out/recovery_drill")
     parser.add_argument("--damage-step", type=int, default=4)
+    parser.add_argument("--fault-mode", choices=("append", "truncate", "remove"),
+                        default="append", help="Damage a COPY, never the original")
     args = parser.parse_args(argv)
     try:
         if args.mode == "check":
@@ -24,9 +26,12 @@ def main(argv: list[str] | None = None) -> int:
             print("Restart step:", report["restart_step"])
             print("Final step:", report["target_step"])
         else:
+            kwargs = {"damage_step": args.damage_step}
+            # Preserve the original call signature for the default drill.
+            if args.fault_mode != "append":
+                kwargs["damage_mode"] = args.fault_mode
             report = run_recovery_drill(
-                args.source_dir, args.corpus, args.drill_dir,
-                damage_step=args.damage_step,
+                args.source_dir, args.corpus, args.drill_dir, **kwargs,
             )
             print("Disposable recovery drill:", report["status"])
             print("Damaged intermediate step:", report["damage_step"])

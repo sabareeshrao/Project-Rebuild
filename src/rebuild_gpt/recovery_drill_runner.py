@@ -14,6 +14,7 @@ def run_recovery_drill(
     drill_dir: str | Path,
     *,
     damage_step: int,
+    damage_mode: str = "append",
 ) -> dict:
     """Recover from one damaged latest-intermediate checkpoint in a new copy.
 
@@ -29,7 +30,8 @@ def run_recovery_drill(
             "damage_step must be the latest intermediate stop, with an earlier fallback"
         )
     copied = prepare_recovery_drill(
-        source_dir, corpus_path, drill_dir, damage_step=damage_step,
+        source_dir, corpus_path, drill_dir,
+        damage_step=damage_step, damage_mode=damage_mode,
     )
     # This command writes recovery_audit.json only after full state parity.
     success = recovery_cli([
@@ -46,6 +48,7 @@ def run_recovery_drill(
     return {
         "status": "passed",
         "damage_step": damage_step,
+        "damage_mode": copied["damage_mode"],
         "fallback_step": independently_verified["restart_step"],
         "original_directory": copied["original_directory"],
         "drill_directory": copied["drill_directory"],
