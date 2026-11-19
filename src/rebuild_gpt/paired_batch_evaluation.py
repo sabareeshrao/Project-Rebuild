@@ -14,6 +14,7 @@ from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_pl
 from rebuild_gpt.shifted_evaluation import prepare_shifted_evaluation_index_plan
 from rebuild_gpt.lattice_diagnostics import LatticeDiagnostics, describe_disjoint_lattice
 from rebuild_gpt.window_overlap import WindowOverlap, analyze_index_plan_overlap
+from rebuild_gpt.cross_seed_overlap import CrossSeedOverlap, analyze_cross_seed_overlap
 from rebuild_gpt.evaluation_samples import collect_split_losses
 from rebuild_gpt.evaluation_stats import LossDispersion, summarize_losses
 from rebuild_gpt.gpt import GPTLanguageModel
@@ -30,6 +31,7 @@ class PairedBatchValidation:
     overlap_by_seed: tuple[WindowOverlap, ...]
     sampling_policy: str
     lattice_by_seed: tuple[LatticeDiagnostics | None, ...]
+    cross_seed_overlap: CrossSeedOverlap
 
 
 def compare_paired_batches(
@@ -68,6 +70,7 @@ def compare_paired_batches(
     baseline_by_seed, candidate_by_seed, delta_by_seed, means = [], [], [], []
     overlaps = []
     lattices = []
+    plans = []
     plan_builder = {
         "replacement": prepare_evaluation_index_plan,
         "disjoint": prepare_disjoint_evaluation_index_plan,
@@ -78,6 +81,7 @@ def compare_paired_batches(
             tokens, batch_size=batch_size, block_size=block_size,
             eval_batches=eval_batches, seed=seed,
         )
+        plans.append(plan)
         overlaps.append(analyze_index_plan_overlap(plan))
         lattices.append(
             describe_disjoint_lattice(plan)
@@ -100,4 +104,5 @@ def compare_paired_batches(
         overlap_by_seed=tuple(overlaps),
         sampling_policy=sampling_policy,
         lattice_by_seed=tuple(lattices),
+        cross_seed_overlap=analyze_cross_seed_overlap(plans),
     )
