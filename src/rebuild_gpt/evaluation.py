@@ -4,6 +4,7 @@ import torch
 
 from rebuild_gpt.data import sample_batch
 from rebuild_gpt.eval_cache import PreparedEvaluationBatches
+from rebuild_gpt.eval_index_plan import EvaluationIndexPlan
 from rebuild_gpt.gpt import GPTLanguageModel
 
 
@@ -108,4 +109,39 @@ def evaluate_prepared_train_val_loss(
     return {
         "train_loss": evaluate_prepared_split_loss(model, train),
         "validation_loss": evaluate_prepared_split_loss(model, validation),
+    }
+
+
+def evaluate_index_plan_split_loss(
+    model: GPTLanguageModel,
+    plan: EvaluationIndexPlan,
+) -> float:
+    """Regather each indexed batch and evaluate current model weights."""
+    if not isinstance(plan, EvaluationIndexPlan) or not plan.starts:
+        raise ValueError("plan must contain nonempty evaluation start indices")
+    if plan.block_size > model.config.block_size:
+        raise ValueError("block_size exceeds the model context window")
+    device = next(model.parameters()).device
+    was_training = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            losses = [
+                model.loss(x.to(device), y.to(device)).item()
+                for x, y in plan.batches()
+            ]
+        return sum(losses) / len(losses)
+    finally:
+        model.train(was_training)
+
+
+def evaluate_index_plan_train_val_loss(
+    model: GPTLanguageModel,
+    train: EvaluationIndexPlan,
+    validation: EvaluationIndexPlan,
+) -> dict[str, float]:
+    """Same fixed train/validation samples as the regenerate evaluator."""
+    return {
+        "train_loss": evaluate_index_plan_split_loss(model, train),
+        "validation_loss": evaluate_index_plan_split_loss(model, validation),
     }
