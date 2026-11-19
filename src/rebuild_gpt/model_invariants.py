@@ -94,3 +94,65 @@ def check_batch_independence(
         }
     finally:
         model.train(original_mode)
+
+
+def check_forward_contract(
+    model: GPTLanguageModel,
+    tokens: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    atol: float = 2e-5,
+    rtol: float = 1e-5,
+) -> dict[str, int | float]:
+    """Validate nanoGPT's training logits, inference logits and masked loss.
+
+    With targets: [B,T,V] logits and cross-entropy loss ignoring -1.
+    Without targets: [B,1,V] final-position logits and None loss.
+    """
+    from torch.nn import functional as F
+
+    _validate_token_batch(model, tokens)
+    if (not isinstance(targets, torch.Tensor)
+            or targets.shape != tokens.shape or targets.dtype != torch.long):
+        raise ValueError("targets must be torch.long with shape [batch, time]")
+    valid_targets = (targets == -1) | ((targets >= 0) & (targets < model.config.vocab_size))
+    if not bool(valid_targets.all()):
+        raise ValueError("Targets must be vocabulary IDs or -1")
+    supervised = int((targets != -1).sum())
+    if supervised == 0:
+        raise ValueError("At least one supervised token is required")
+
+    original_mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            full = model(tokens)
+            train_logits, loss = model.forward_nanogpt(tokens, targets)
+            final_logits, no_loss = model.forward_nanogpt(tokens)
+            expected_loss = F.cross_entropy(
+                full.reshape(-1, full.size(-1)),
+                targets.reshape(-1),
+                ignore_index=-1,
+            )
+        if loss is None or no_loss is not None:
+            raise AssertionError("nanoGPT forward returned an incorrect loss contract")
+        try:
+            torch.testing.assert_close(train_logits, full, atol=atol, rtol=rtol)
+            torch.testing.assert_close(final_logits, full[:, -1:, :],
+                                       atol=atol, rtol=rtol)
+            torch.testing.assert_close(loss, expected_loss, atol=atol, rtol=rtol)
+        except AssertionError as exc:
+            raise AssertionError(
+                "nanoGPT forward contract mismatch: logits, final position or masked loss"
+            ) from exc
+        return {
+            "supervised_positions": supervised,
+            "ignored_positions": targets.numel() - supervised,
+            "max_train_logit_error": float((train_logits - full).abs().max()),
+            "max_last_logit_error": float(
+                (final_logits - full[:, -1:, :]).abs().max()
+            ),
+            "masked_loss_error": float((loss - expected_loss).abs()),
+        }
+    finally:
+        model.train(original_mode)
