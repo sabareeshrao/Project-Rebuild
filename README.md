@@ -2066,3 +2066,45 @@ Use a fresh output directory when repeating the training step.
 A successful audit checks the documented **small CPU model** only:
 it does not verify upstream nanoGPT's entire training stack, imply
 model quality, or authenticate untrusted checkpoints.
+
+
+## GPT semantics lab after the 300-commit milestone (commits 305–309)
+
+The post-milestone learning track now has four additional small-model
+experiments:
+
+- **Dropout:** evaluation should repeat exactly; training uses
+  different random masks, without permanently consuming global RNG.
+- **Ignored targets:** `-1` labels contribute neither cross-entropy
+  nor parameter gradients compared with explicitly selected labels.
+- **Weight tying:** a shared input/output embedding parameter receives
+  the **sum** of two gradient paths.
+- **Next-token distribution:** inspect temperature, top-k support,
+  softmax probabilities and Shannon entropy, without actually sampling.
+
+Run them together on a trusted local saved checkpoint:
+
+```bash
+# If needed, create a tiny trained GPT in a fresh directory:
+python -m rebuild_gpt.release_review_cli --mode train \
+  --output-dir out/release_review
+
+# Run four post-milestone semantics checks:
+python -m rebuild_gpt.model_semantics_cli \
+  --checkpoint out/release_review/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --output out/release_review/model_semantics.json
+
+# Focused regression tests:
+python -m pytest -q tests/test_dropout_semantics.py \
+  tests/test_masked_gradient_parity.py \
+  tests/test_tied_gradient_decomposition.py \
+  tests/test_next_token_distribution.py \
+  tests/test_model_semantics.py
+```
+
+The audit records input SHA-256 digests and a per-check result. It
+uses a disposable model with nonzero dropout if the saved training
+checkpoint had dropout disabled. These are local educational
+invariants, not evidence of full original nanoGPT training parity or
+GPT-2-scale language quality.
