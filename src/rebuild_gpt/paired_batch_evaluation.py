@@ -12,6 +12,10 @@ import torch
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
 from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_plan
 from rebuild_gpt.shifted_evaluation import prepare_shifted_evaluation_index_plan
+from rebuild_gpt.balanced_evaluation import prepare_balanced_evaluation_index_plan
+from rebuild_gpt.start_region_diagnostics import (
+    StartRegionDiagnostics, analyze_start_regions,
+)
 from rebuild_gpt.lattice_diagnostics import LatticeDiagnostics, describe_disjoint_lattice
 from rebuild_gpt.window_overlap import WindowOverlap, analyze_index_plan_overlap
 from rebuild_gpt.cross_seed_overlap import CrossSeedOverlap, analyze_cross_seed_overlap
@@ -32,6 +36,8 @@ class PairedBatchValidation:
     sampling_policy: str
     lattice_by_seed: tuple[LatticeDiagnostics | None, ...]
     cross_seed_overlap: CrossSeedOverlap
+    start_regions_by_seed: tuple[StartRegionDiagnostics | None, ...]
+    sampling_regions: int | None
 
 
 def compare_paired_batches(
@@ -44,6 +50,7 @@ def compare_paired_batches(
     block_size: int,
     eval_batches: int = 4,
     sampling_policy: str = "replacement",
+    sampling_regions: int = 4,
 ) -> PairedBatchValidation:
     """Return the aligned per-batch candidate-minus-baseline losses."""
     if not isinstance(seeds, Sequence) or isinstance(seeds, (str, bytes)):
@@ -55,8 +62,14 @@ def compare_paired_batches(
         or len(set(chosen)) != len(chosen)
     ):
         raise ValueError("seeds must be unique nonnegative integers")
-    if sampling_policy not in ("replacement", "disjoint", "shifted"):
-        raise ValueError("sampling_policy must be replacement, disjoint or shifted")
+    if sampling_policy not in ("replacement", "disjoint", "shifted", "balanced"):
+        raise ValueError("sampling_policy must be replacement, disjoint, shifted or balanced")
+    if sampling_policy != "balanced" and sampling_regions != 4:
+        raise ValueError("sampling_regions requires balanced sampling_policy")
+    if sampling_policy == "balanced" and (
+        type(sampling_regions) is not int or sampling_regions < 1
+    ):
+        raise ValueError("sampling_regions must be a positive integer")
     if not isinstance(tokens, torch.Tensor):
         raise ValueError("tokens must be a tensor")
     if baseline.config.vocab_size != candidate.config.vocab_size:
@@ -70,22 +83,29 @@ def compare_paired_batches(
     baseline_by_seed, candidate_by_seed, delta_by_seed, means = [], [], [], []
     overlaps = []
     lattices = []
+    start_regions = []
     plans = []
     plan_builder = {
         "replacement": prepare_evaluation_index_plan,
         "disjoint": prepare_disjoint_evaluation_index_plan,
         "shifted": prepare_shifted_evaluation_index_plan,
+        "balanced": prepare_balanced_evaluation_index_plan,
     }[sampling_policy]
     for seed in chosen:
         plan = plan_builder(
             tokens, batch_size=batch_size, block_size=block_size,
             eval_batches=eval_batches, seed=seed,
+            **({"region_count": sampling_regions} if sampling_policy == "balanced" else {}),
         )
         plans.append(plan)
         overlaps.append(analyze_index_plan_overlap(plan))
         lattices.append(
             describe_disjoint_lattice(plan)
-            if sampling_policy != "replacement" else None
+            if sampling_policy in ("disjoint", "shifted") else None
+        )
+        start_regions.append(
+            analyze_start_regions(plan, region_count=sampling_regions)
+            if sampling_policy == "balanced" else None
         )
         a = collect_split_losses(baseline, plan)
         b = collect_split_losses(candidate, plan)
@@ -105,4 +125,6 @@ def compare_paired_batches(
         sampling_policy=sampling_policy,
         lattice_by_seed=tuple(lattices),
         cross_seed_overlap=analyze_cross_seed_overlap(plans),
+        start_regions_by_seed=tuple(start_regions),
+        sampling_regions=sampling_regions if sampling_policy == "balanced" else None,
     )

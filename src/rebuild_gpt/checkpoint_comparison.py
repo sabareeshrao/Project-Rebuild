@@ -28,6 +28,7 @@ class SavedCheckpointComparison:
     paired: PairedBatchValidation
     directions: PairedDiagnostics
     sampling_policy: str
+    sampling_regions: int | None
 
 
 def compare_saved_checkpoints(
@@ -41,6 +42,7 @@ def compare_saved_checkpoints(
     eval_batches: int = 4,
     device: str = "cpu",
     sampling_policy: str = "replacement",
+    sampling_regions: int = 4,
 ) -> SavedCheckpointComparison:
     """Load trusted self-contained inference bundles and compare held-out loss.
 
@@ -66,6 +68,7 @@ def compare_saved_checkpoints(
         validation, seeds=seeds, batch_size=batch_size,
         block_size=block_size, eval_batches=eval_batches,
         sampling_policy=sampling_policy,
+        sampling_regions=sampling_regions,
     )
     return SavedCheckpointComparison(
         baseline_path=str(baseline_path),
@@ -78,4 +81,5 @@ def compare_saved_checkpoints(
         paired=paired,
         directions=summarize_paired_deltas(paired.differences),
         sampling_policy=sampling_policy,
+        sampling_regions=sampling_regions if sampling_policy == "balanced" else None,
     )
