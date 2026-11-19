@@ -71,3 +71,36 @@ def compare_capstone_forward(
         "max_logit_error": result.max_logit_error,
         "loss_error": result.loss_error,
     }
+
+
+def compare_capstone_generation(
+    checkpoint_path: str | Path,
+    upstream_model_path: str | Path,
+    *,
+    prompt: str = "a",
+    new_tokens: int = 8,
+    temperature: float = 0.8,
+    top_k: int | None = 3,
+    seed: int = 29,
+) -> dict[str, int | float | None]:
+    """Compare sampled IDs using saved weights and a trusted upstream source."""
+    from rebuild_gpt.generation_parity import compare_generation_against_upstream
+    from rebuild_gpt.text_checkpoint import load_text_checkpoint
+    from rebuild_gpt.upstream_parity import load_upstream_model
+
+    if not isinstance(prompt, str) or not prompt:
+        raise ValueError("prompt must be non-empty text")
+    ours, tokenizer = load_text_checkpoint(checkpoint_path)
+    prompt_ids = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long)
+    upstream = load_upstream_model(upstream_model_path, ours.config)
+    result = compare_generation_against_upstream(
+        ours, upstream, prompt_ids, new_tokens,
+        temperature=temperature, top_k=top_k, seed=seed,
+    )
+    return {
+        "matched_tensors": result.matched_tensors,
+        "prompt_tokens": prompt_ids.size(1),
+        "new_tokens": result.new_tokens,
+        "temperature": result.temperature,
+        "top_k": result.top_k,
+    }
