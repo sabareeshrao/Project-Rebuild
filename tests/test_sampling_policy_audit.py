@@ -68,7 +68,7 @@ def test_balanced_sample_invariants_reconcile_with_union():
 
 
 @pytest.mark.parametrize("start_regions,token_bins", [
-    (0, 4), (4, 0), (30, 4), (4, 61), (True, 4),
+    (0, 4), (4, 0), (58, 4), (4, 61), (True, 4),
 ])
 def test_invalid_partition_counts_rejected(start_regions, token_bins):
     tokens = torch.arange(60)
