@@ -1651,3 +1651,45 @@ The unit tests use an explicit local adapter rather than representing
 that genuine upstream nanoGPT was executed. These controlled CPU
 experiments still do not establish full GPT-2 training equivalence.
 See lessons 243–247 for exercises and the distinctions.
+
+
+## Exact CPU training resume audit (commits 255–259; lessons 248–252)
+
+The existing character-GPT trainer already writes self-contained training
+resume points with weights, AdamW moments, CPU/batch RNG state, evaluation
+history, model settings and corpus digest. These lessons add a **genuine
+end-to-end resume parity experiment**, not a second checkpoint format.
+
+```bash
+# Run straight-through vs interrupted+resumed CPU training.
+python -m rebuild_gpt.resume_audit_cli \
+  --corpus data/tiny_story.txt \
+  --output-dir out/resume_lab \
+  --first-steps 2 --total-steps 4 --seed 13
+
+# Examine the saved AdamW moments and sampler state.
+python examples/141_inspect_resume_state.py out/resume_lab/partial.pt
+
+# Independently compare final complete training-state contents.
+python examples/142_compare_resume_states.py \
+  out/resume_lab/full.pt out/resume_lab/resumed.pt
+
+# Focused tests
+python -m pytest -q tests/test_resume_inspection.py \
+  tests/test_resume_comparison.py \
+  tests/test_resume_equivalence.py \
+  tests/test_resume_audit.py \
+  tests/test_resume_audit_cli.py
+```
+
+The command saves `full.pt` (uninterrupted), `partial.pt`,
+`resumed.pt`, and `resume_audit.json` under the output directory.
+It compares model weights, AdamW moments, optimizer group settings,
+CPU and batch-sampler RNG, learning-rate schedule controls, evaluation
+history and metrics **exactly**. The experiment uses grouped AdamW and
+CPU fp32; it is not a cross-hardware determinism guarantee or a
+reproduction of original nanoGPT's complete training loop.
+
+The audit is written only after all checks succeed; old successful
+reports are cleared before rerunning. Torch checkpoints should only
+be loaded from trusted sources.
