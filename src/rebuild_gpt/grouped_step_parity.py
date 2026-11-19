@@ -69,3 +69,114 @@ def compare_one_grouped_adamw_step(
         "max_updated_weight_error": max_error,
         "largest_local_parameter_change": max_update,
     }
+
+
+def compare_grouped_adamw_trajectory(
+    ours, upstream, inputs: torch.Tensor, targets: torch.Tensor,
+    *, steps: int = 3, learning_rate: float = 0.001, weight_decay: float = 0.1,
+    atol: float = 2e-5, rtol: float = 1e-5,
+) -> dict:
+    """Compare repeated steps with PERSISTENT AdamW optimizer state.
+
+    No model re-synchronization, optimizer re-creation or reseeding
+    occurs between steps. Both models run with dropout disabled.
+    """
+    from rebuild_gpt.training_parity import capture_upstream_named_gradients
+    from rebuild_gpt.upstream_parity import synchronize_upstream_weights
+
+    if type(steps) is not int or steps < 1:
+        raise ValueError("steps must be a positive integer")
+    if (isinstance(learning_rate, bool) or not isinstance(learning_rate, (int, float))
+            or not math.isfinite(learning_rate) or learning_rate <= 0):
+        raise ValueError("learning_rate must be finite and positive")
+    if (isinstance(weight_decay, bool) or not isinstance(weight_decay, (int, float))
+            or not math.isfinite(weight_decay) or weight_decay < 0):
+        raise ValueError("weight_decay must be finite and nonnegative")
+    if (inputs.ndim != 2 or inputs.numel() == 0 or inputs.dtype != torch.long
+            or targets.shape != inputs.shape or targets.dtype != torch.long):
+        raise ValueError("inputs and targets must be non-empty [B,T] long tensors")
+    if not callable(getattr(upstream, "configure_optimizers", None)):
+        raise ValueError("Reference must implement configure_optimizers()")
+
+    synchronize_upstream_weights(ours, upstream)  # Once, before step one.
+    local_opt = configure_adamw(
+        ours, learning_rate=learning_rate, weight_decay=weight_decay,
+        betas=(0.9, 0.95), device_type="cpu",
+    )
+    reference_opt = upstream.configure_optimizers(
+        weight_decay=weight_decay, learning_rate=learning_rate,
+        betas=(0.9, 0.95), device_type="cpu",
+    )
+    groups = compare_grouped_optimizer_layout(
+        ours, upstream, local_opt, reference_opt, weight_decay=weight_decay,
+    )
+    previous_local_mode, previous_reference_mode = ours.training, upstream.training
+    history = []
+    try:
+        ours.eval()
+        upstream.eval()
+        for step in range(1, steps + 1):
+            local_opt.zero_grad(set_to_none=True)
+            reference_opt.zero_grad(set_to_none=True)
+            _, local_loss = ours.forward_nanogpt(inputs, targets)
+            _, reference_loss = upstream(inputs, targets)
+            torch.testing.assert_close(
+                local_loss.detach(), reference_loss.detach(),
+                atol=atol, rtol=rtol,
+            )
+            local_loss.backward()
+            reference_loss.backward()
+
+            local_grads = capture_upstream_named_gradients(ours)
+            upstream_grads = {
+                name: param.grad.detach().clone()
+                for name, param in upstream.named_parameters()
+                if param.grad is not None
+            }
+            if set(local_grads) != set(upstream_grads):
+                raise ValueError("Backward gradient keys differ")
+            gradient_error = 0.0
+            for name in sorted(local_grads):
+                try:
+                    torch.testing.assert_close(
+                        local_grads[name], upstream_grads[name],
+                        atol=atol, rtol=rtol,
+                    )
+                except AssertionError as exc:
+                    raise AssertionError(
+                        f"Step {step} gradient mismatch at {name}: {exc}"
+                    ) from exc
+                gradient_error = max(
+                    gradient_error,
+                    (local_grads[name] - upstream_grads[name]).abs().max().item(),
+                )
+            local_opt.step()
+            reference_opt.step()
+            local_state = export_nanogpt_state_dict(ours)
+            reference_state = upstream.state_dict()
+            if not set(local_state).issubset(reference_state):
+                raise ValueError("Missing upstream state keys after optimizer update")
+            weight_error = 0.0
+            for name in sorted(local_state):
+                try:
+                    torch.testing.assert_close(
+                        local_state[name], reference_state[name],
+                        atol=atol, rtol=rtol,
+                    )
+                except AssertionError as exc:
+                    raise AssertionError(
+                        f"Step {step} updated parameter mismatch at {name}: {exc}"
+                    ) from exc
+                weight_error = max(
+                    weight_error,
+                    (local_state[name] - reference_state[name]).abs().max().item(),
+                )
+            history.append({
+                "step": step, "loss": float(local_loss.detach()),
+                "max_gradient_error": gradient_error,
+                "max_updated_weight_error": weight_error,
+            })
+    finally:
+        ours.train(previous_local_mode)
+        upstream.train(previous_reference_mode)
+    return {"steps": steps, "group_layout": groups, "history": history}

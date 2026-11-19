@@ -49,7 +49,6 @@ def test_mismatch_in_actual_decay_configuration_is_reported():
 
 def test_optimizer_parameter_coverage_is_checked():
     module = nn.Linear(3, 2)
-    opt = nn.optim.AdamW(module.parameters()) if hasattr(nn, "optim") else None
     from torch.optim import AdamW
     opt = AdamW([module.weight])
     with pytest.raises(ValueError, match="all trainable"):
