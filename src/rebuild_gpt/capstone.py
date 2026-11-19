@@ -63,3 +63,36 @@ def save_capstone_run(
         encoding="utf-8",
     )
     return manifest
+
+
+def verify_capstone_run(corpus_path: str | Path, output_dir: str | Path) -> dict:
+    """Verify bytes and replay sampling without any training or optimizer steps."""
+    import json
+
+    import torch
+
+    from rebuild_gpt.text_checkpoint import load_text_checkpoint
+    from rebuild_gpt.text_generation import generate_text
+
+    output = Path(output_dir)
+    manifest = json.loads((output / "run.json").read_text(encoding="utf-8"))
+    if manifest.get("format_version") != 1 or manifest.get("checkpoint") != "model.pt":
+        raise ValueError("Unsupported capstone manifest format or checkpoint name")
+    if _sha256_file(Path(corpus_path)) != manifest["corpus_sha256"]:
+        raise ValueError("Corpus SHA-256 mismatch")
+    checkpoint = output / "model.pt"
+    if _sha256_file(checkpoint) != manifest["checkpoint_sha256"]:
+        raise ValueError("Checkpoint SHA-256 mismatch")
+    if (output / "sample.txt").read_text(encoding="utf-8") != manifest["generated_text"]:
+        raise ValueError("Saved sample does not match manifest")
+
+    spec = CapstoneSpec(**manifest["settings"])
+    restored, tokenizer = load_text_checkpoint(checkpoint)
+    reproduced = generate_text(
+        restored, tokenizer, spec.prompt, spec.new_tokens,
+        temperature=spec.temperature, top_k=spec.top_k,
+        generator=torch.Generator().manual_seed(spec.seed + 1),
+    )
+    if reproduced != manifest["generated_text"]:
+        raise ValueError("Generated text cannot be reproduced from the saved model")
+    return manifest
