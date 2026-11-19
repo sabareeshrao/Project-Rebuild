@@ -26,9 +26,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batch-counts", default="1,2,4")
     parser.add_argument(
         "--sampling-policy",
-        choices=("replacement", "disjoint", "shifted", "both", "all"),
+        choices=("replacement", "disjoint", "shifted", "balanced", "both", "all", "extended"),
         default="replacement",
-        help="Compare one policy, the original pair (both), or all three",
+        help="One policy, original pair (both), previous three (all), or four (extended)",
+    )
+    parser.add_argument(
+        "--sampling-regions", type=int, default=None,
+        help="Eligible-start region count when policy is balanced or extended",
     )
     parser.add_argument("--first-seed", type=int, default=187)
     parser.add_argument("--seed-count", type=int, default=3)
@@ -40,6 +44,12 @@ def main(argv: list[str] | None = None) -> int:
         or args.first_seed < 0
     ):
         parser.error("batch-size, context and seed-count must be positive; first-seed nonnegative")
+    if args.sampling_regions is not None:
+        if args.sampling_policy not in ("balanced", "extended"):
+            parser.error("--sampling-regions requires balanced or extended sampling-policy")
+        if args.sampling_regions < 1:
+            parser.error("--sampling-regions must be positive")
+    region_count = args.sampling_regions if args.sampling_regions is not None else 4
     inputs = {Path(x).resolve() for x in (args.baseline, args.candidate, args.corpus)}
     outputs = [Path(x).resolve() for x in (args.csv, args.json) if x is not None]
     if len(set(outputs)) != len(outputs) or any(p in inputs for p in outputs):
@@ -51,15 +61,11 @@ def main(argv: list[str] | None = None) -> int:
         device = resolve_device(args.device)
         chosen = tuple(range(args.first_seed, args.first_seed + args.seed_count))
         rows = []
-        policies = (
-            ("replacement", "disjoint", "shifted")
-            if args.sampling_policy == "all"
-            else (
-                ("replacement", "disjoint")
-                if args.sampling_policy == "both"
-                else (args.sampling_policy,)
-            )
-        )
+        policies = {
+            "both": ("replacement", "disjoint"),
+            "all": ("replacement", "disjoint", "shifted"),
+            "extended": ("replacement", "disjoint", "shifted", "balanced"),
+        }.get(args.sampling_policy, (args.sampling_policy,))
         for policy in policies:
             for count in counts:
                 result = compare_saved_checkpoints(
@@ -67,13 +73,28 @@ def main(argv: list[str] | None = None) -> int:
                     seeds=chosen, batch_size=args.batch_size,
                     block_size=args.context, eval_batches=count,
                     device=args.device, sampling_policy=policy,
+                    sampling_regions=region_count,
                 )
                 directions = result.directions.seed_mean_directions
                 overlaps = result.paired.overlap_by_seed
                 across = result.paired.cross_seed_overlap
+                start_summary = result.paired.aggregate_start_regions
                 rows.append({
                     "sampling_policy": policy,
                     "eval_batches_per_seed": count,
+                    "sampling_regions": region_count if start_summary else None,
+                    "start_region_counts_across_seeds": (
+                        ",".join(map(str, start_summary.aggregate_counts))
+                        if start_summary else None
+                    ),
+                    "maximum_seed_start_imbalance": (
+                        start_summary.maximum_seed_imbalance
+                        if start_summary else None
+                    ),
+                    "seeds_with_empty_start_regions": (
+                        start_summary.seeds_with_any_empty_region
+                        if start_summary else None
+                    ),
                     "lattice_phases_by_seed": ",".join(
                         str(lattice.phase) if lattice is not None else "n/a"
                         for lattice in result.paired.lattice_by_seed
@@ -134,15 +155,21 @@ def main(argv: list[str] | None = None) -> int:
                 "context": args.context,
                 "eval_batch_counts": list(counts),
                 "sampling_policy": args.sampling_policy,
+                "sampling_regions": (
+                    region_count if "balanced" in policies else None
+                ),
                 "first_seed": args.first_seed,
                 "seed_count": args.seed_count,
                 "validation_fraction": 0.2,
                 "optimizer_updates_during_comparison": 0,
                 "sampled_windows_share_seeded_prefixes": (
-                    args.sampling_policy not in ("shifted", "all")
+                    args.sampling_policy not in ("shifted", "all", "balanced", "extended")
                 ),
                 "shifted_phase_set_can_change_with_budget": (
-                    args.sampling_policy in ("shifted", "all")
+                    args.sampling_policy in ("shifted", "all", "extended")
+                ),
+                "balanced_region_allocation_can_change_with_budget": (
+                    args.sampling_policy in ("balanced", "extended")
                 ),
             },
         )
@@ -152,7 +179,10 @@ def main(argv: list[str] | None = None) -> int:
             "are dependent. Shifted lattice phases depend on the requested "
             "count: different budgets need not share prefixes. The three "
             "policies sample different distributions; shifted and fixed "
-            "policies use T+1 tiles. All observations still come from one "
+            "policies use T+1 tiles. Balanced sampling equalizes start "
+            "counts across regions but permits overlapping windows and "
+            "changing budget allocations, so its budgets also need not "
+            "share prefixes. All observations still come from one "
             "held-out corpus. The legacy total_unique_corpus_positions_"
             "across_seed_plans column is NOT a global union: it sums "
             "within-seed unique coverage. Use global_unique_corpus_token_positions "
@@ -164,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
         print("JSON:", args.json)
     print(
         "Replacement/fixed-disjoint budgets reuse the same seeded "
-        "sampling prefix; shifted phase feasibility can change with budget."
+        "sampling prefix; shifted phases and balanced allocations "
+        "can change with budget."
     )
     return 0
 
