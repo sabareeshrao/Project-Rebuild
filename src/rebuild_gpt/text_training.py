@@ -10,6 +10,7 @@ from rebuild_gpt.checkpoint_policy import checkpointed_indices
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
+from rebuild_gpt.microbatches import split_microbatches
 from rebuild_gpt.devices import resolve_device
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.optimizers import configure_adamw
@@ -47,6 +48,7 @@ def train_char_gpt(
     weight_decay: float = 0.1,
     adam_betas: tuple[float, float] = (0.9, 0.95),
     gradient_accumulation_steps: int = 1,
+    microbatch_size: int | None = None,
     resume_from: str | Path | None = None,
     training_state_path: str | Path | None = None,
     device: str = "cpu",
@@ -96,6 +98,13 @@ def train_char_gpt(
         raise ValueError("validation_mode must be sampled or full")
     if type(gradient_accumulation_steps) is not int or gradient_accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be positive")
+    if microbatch_size is not None:
+        if type(microbatch_size) is not int or not 1 <= microbatch_size <= batch_size:
+            raise ValueError("microbatch_size must be between 1 and batch_size")
+        if gradient_accumulation_steps != 1:
+            raise ValueError(
+                "microbatch_size and gradient_accumulation_steps > 1 cannot be combined"
+            )
     if type(grouped_adamw) is not bool:
         raise ValueError("grouped_adamw must be boolean")
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
@@ -155,6 +164,8 @@ def train_char_gpt(
         controls["activation_checkpointing"] = True
     if checkpoint_every_n is not None:
         controls["checkpoint_every_n"] = checkpoint_every_n
+    if microbatch_size is not None:
+        controls["microbatch_size"] = microbatch_size
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
@@ -245,12 +256,27 @@ def train_char_gpt(
     )
     for step in range(start_step + 1, steps + 1):
         microbatches = []
-        for _ in range(gradient_accumulation_steps):
+        if microbatch_size is not None:
+            # Sample ONE logical [B,T] batch, then split it before transfer.
+            # This retains the exact same examples as a normal B-sized step.
             inputs, targets = sample_batch(
                 train, batch_size=batch_size, block_size=block_size,
                 generator=training_rng,
             )
-            microbatches.append((inputs.to(compute_device), targets.to(compute_device)))
+            microbatches = [
+                (part_x.to(compute_device), part_y.to(compute_device))
+                for part_x, part_y in split_microbatches(
+                    inputs, targets, microbatch_size=microbatch_size,
+                )
+            ]
+        else:
+            # Legacy behavior: B examples for each of A independent samples.
+            for _ in range(gradient_accumulation_steps):
+                inputs, targets = sample_batch(
+                    train, batch_size=batch_size, block_size=block_size,
+                    generator=training_rng,
+                )
+                microbatches.append((inputs.to(compute_device), targets.to(compute_device)))
         if lr_decay_steps is not None:
             last_learning_rate = cosine_warmup_lr(
                 step - 1, max_lr=learning_rate, min_lr=min_lr,
@@ -258,7 +284,7 @@ def train_char_gpt(
             )
             for group in optimizer.param_groups:
                 group["lr"] = last_learning_rate
-        if gradient_accumulation_steps == 1:
+        if len(microbatches) == 1:
             inputs, targets = microbatches[0]
             last_loss = train_step(
                 model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
@@ -311,5 +337,10 @@ def train_char_gpt(
     if gradient_accumulation_steps > 1:
         metrics["effective_tokens_per_step"] = float(
             gradient_accumulation_steps * batch_size * block_size
+        )
+    if microbatch_size is not None:
+        metrics["effective_tokens_per_step"] = float(batch_size * block_size)
+        metrics["microbatches_per_step"] = float(
+            (batch_size + microbatch_size - 1) // microbatch_size
         )
     return model, tokenizer, metrics

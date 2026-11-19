@@ -30,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=0.02)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    parser.add_argument("--microbatch-size", type=int, default=None,
+                        help="Split one logical --batch-size batch into chunks; incompatible with accumulation steps >1")
     parser.add_argument("--grouped-adamw", action="store_true")
     parser.add_argument("--weight-decay", type=float, default=0.1)
     parser.add_argument("--adam-beta1", type=float, default=0.9)
@@ -53,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.activation_checkpointing and args.checkpoint_every_n is not None:
         parser.error("--activation-checkpointing and --checkpoint-every-n are mutually exclusive")
+    if args.microbatch_size is not None and args.gradient_accumulation_steps != 1:
+        parser.error("--microbatch-size and --gradient-accumulation-steps > 1 cannot be combined")
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
@@ -83,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
             weight_decay=args.weight_decay,
             adam_betas=(args.adam_beta1, args.adam_beta2),
             gradient_accumulation_steps=args.gradient_accumulation_steps,
+            microbatch_size=args.microbatch_size,
             resume_from=args.resume_from,
             training_state_path=args.training_state,
             device=args.device,
@@ -114,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             "lr_decay_steps": args.lr_decay_steps,
             "min_lr": args.min_lr,
             "gradient_accumulation_steps": args.gradient_accumulation_steps,
+            "microbatch_size": args.microbatch_size,
             "grouped_adamw": args.grouped_adamw,
             "weight_decay": args.weight_decay if args.grouped_adamw else None,
             "adam_betas": [args.adam_beta1, args.adam_beta2] if args.grouped_adamw else None,

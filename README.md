@@ -830,3 +830,35 @@ Both CPU and CUDA training benchmarks reuse synthetic microbatches;
 throughput excludes data loading. CSV timings and JSON metadata are
 measurement artifacts, not claims of hardware-independent speedups.
 See lessons 128–132 in `lessons/`.
+
+## Logical-batch microbatching (commits 136–140)
+
+The project now distinguishes the **logical batch** (all examples
+contributing to one update) from the **microbatch** (examples processed
+together in one forward/backward pass). Uneven last chunks are
+weighted by target count, so every next-token target contributes
+equally.
+
+```bash
+# Five sequences per optimizer update, split (2,2,1):
+python -m rebuild_gpt.train_cli --steps 2 \
+  --batch-size 5 --microbatch-size 2
+
+# Compare the same logical batch across chunk sizes:
+python examples/97_microbatch_benchmark.py \
+  --logical-batch-size 6 --microbatch-sizes 1,2,3,6 \
+  --csv out/microbatch.csv --json out/microbatch.json
+
+python -m pytest tests/test_microbatches.py \
+  tests/test_uneven_microbatch_gradients.py \
+  tests/test_logical_batch_step.py \
+  tests/test_microbatch_benchmark.py \
+  tests/test_text_microbatch_cli.py -q
+```
+
+Older `--gradient-accumulation-steps` behavior is unchanged. It
+samples that many *independent* batches of size `--batch-size`.
+The new `--microbatch-size` divides one batch and cannot be used
+with accumulation steps >1. The new mode's setting is saved in
+training-state controls; default-mode checkpoints remain compatible.
+See lessons 133–137 in `lessons/`.
