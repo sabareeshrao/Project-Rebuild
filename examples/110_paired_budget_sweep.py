@@ -1,7 +1,7 @@
 """Compare two saved GPTs as sampled validation batch count increases.
 
-All budgets reuse the same prefix of random draws for each seed.
-These are dependent comparisons, NOT independent significance tests.
+Replacement and fixed-origin disjoint budgets reuse seeded prefixes.
+Shifted and balanced budgets may not. No row is a significance test.
 """
 
 import argparse
@@ -181,8 +181,9 @@ def main(argv: list[str] | None = None) -> int:
             "policies sample different distributions; shifted and fixed "
             "policies use T+1 tiles. Balanced sampling equalizes start "
             "counts across regions but permits overlapping windows and "
-            "changing budget allocations, so its budgets also need not "
-            "share prefixes. All observations still come from one "
+            "changing budget allocations: those allocations can change with budget, "
+            "so its sampled windows also need not share prefixes. "
+            "All observations still come from one "
             "held-out corpus. The legacy total_unique_corpus_positions_"
             "across_seed_plans column is NOT a global union: it sums "
             "within-seed unique coverage. Use global_unique_corpus_token_positions "
