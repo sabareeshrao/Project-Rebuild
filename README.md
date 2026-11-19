@@ -1060,3 +1060,32 @@ An oversized plan fails *before* sampling either split.
 
 Break-even calculations from benchmark medians are illustrative,
 not guaranteed speedups. See lessons 163–167 in `lessons/`.
+
+## Compact index-only validation plans (commits 173–177)
+
+Sampled validation can now cache only the **random start positions**
+instead of holding complete input and target tensors on CPU. This
+reduces retained plan data for longer contexts while keeping the
+original corpus alive and regathering selected windows on demand.
+
+```bash
+# Index-only validation; budget limits retained index storage:
+python -m rebuild_gpt.train_cli --steps 5 --eval-every 1 \
+  --eval-batch-backend indices --eval-cache-max-mib 1
+
+# Compare regeneration, full token caching, and index-only caching:
+python examples/106_index_eval_benchmark.py \
+  --batch-size 8 --context 32 --eval-batches 4 \
+  --csv out/index_eval.csv --json out/index_eval.json
+
+python -m pytest tests/test_eval_index_plan.py \
+  tests/test_eval_index_budget.py tests/test_index_plan_evaluation.py \
+  tests/test_index_eval_training.py tests/test_index_eval_cli.py \
+  tests/test_index_eval_benchmark.py -q
+```
+
+The three backends use identical seeded validation examples and
+preserve model weights and checkpoint controls. The retained-index
+budget excludes corpus storage and temporary gathered windows.
+Benchmark medians are evaluation-only, not complete training
+latency; no performance speedup is promised. See lessons 168–172.

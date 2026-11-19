@@ -8,6 +8,7 @@ from pathlib import Path
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_training import train_char_gpt
 from rebuild_gpt.eval_cache_budget import estimate_evaluation_cache_budget
+from rebuild_gpt.eval_index_plan import estimate_index_plan_bytes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,9 +48,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-every", type=int, default=10)
     parser.add_argument("--eval-batches", type=int, default=4)
     parser.add_argument("--validation-mode", choices=("sampled", "full"), default="sampled")
-    parser.add_argument("--eval-batch-backend", choices=("regenerate", "cached"),
+    parser.add_argument("--eval-batch-backend", choices=("regenerate", "cached", "indices"),
                         default="regenerate",
-                        help="Regenerate seeded validation batches or reuse prepared CPU batches")
+                        help="Regenerate seeded batches, cache token windows, or store start indices")
     parser.add_argument("--eval-cache-max-mib", type=float, default=None,
                         help="Optional conservative CPU byte budget (MiB) for cached sampled evaluation")
     parser.add_argument("--grad-clip", type=float, default=None)
@@ -73,10 +74,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--pin-memory and --non-blocking-transfer require --microbatch-size")
     if args.non_blocking_transfer and not args.pin_memory:
         parser.error("--non-blocking-transfer requires --pin-memory")
-    if args.eval_batch_backend == "cached" and args.validation_mode != "sampled":
-        parser.error("--eval-batch-backend cached requires --validation-mode sampled")
-    if args.eval_cache_max_mib is not None and args.eval_batch_backend != "cached":
-        parser.error("--eval-cache-max-mib requires --eval-batch-backend cached")
+    if args.eval_batch_backend != "regenerate" and args.validation_mode != "sampled":
+        parser.error("--eval-batch-backend cached/indices requires --validation-mode sampled")
+    if args.eval_cache_max_mib is not None and args.eval_batch_backend == "regenerate":
+        parser.error("--eval-cache-max-mib requires --eval-batch-backend cached or indices")
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
@@ -155,7 +156,14 @@ def main(argv: list[str] | None = None) -> int:
                     batch_size=args.batch_size, block_size=args.block_size,
                     eval_batches=args.eval_batches,
                 ).total_bytes
-                if args.eval_batch_backend == "cached" else None
+                if args.eval_batch_backend == "cached"
+                else (
+                    estimate_index_plan_bytes(
+                        batch_size=args.batch_size,
+                        eval_batches=args.eval_batches,
+                    )
+                    if args.eval_batch_backend == "indices" else None
+                )
             ),
             "grouped_adamw": args.grouped_adamw,
             "weight_decay": args.weight_decay if args.grouped_adamw else None,
