@@ -48,6 +48,8 @@ def train_char_gpt(
     adam_betas: tuple[float, float] = (0.9, 0.95),
     gradient_accumulation_steps: int = 1,
     microbatch_size: int | None = None,
+    pin_memory: bool = False,
+    non_blocking_transfer: bool = False,
     resume_from: str | Path | None = None,
     training_state_path: str | Path | None = None,
     device: str = "cpu",
@@ -104,6 +106,12 @@ def train_char_gpt(
             raise ValueError(
                 "microbatch_size and gradient_accumulation_steps > 1 cannot be combined"
             )
+    if type(pin_memory) is not bool or type(non_blocking_transfer) is not bool:
+        raise ValueError("pin_memory and non_blocking_transfer must be boolean")
+    if (pin_memory or non_blocking_transfer) and microbatch_size is None:
+        raise ValueError("transfer options require microbatch_size")
+    if non_blocking_transfer and not pin_memory:
+        raise ValueError("non_blocking_transfer requires pin_memory=True")
     if type(grouped_adamw) is not bool:
         raise ValueError("grouped_adamw must be boolean")
     if not grouped_adamw and (weight_decay != 0.1 or adam_betas != (0.9, 0.95)):
@@ -116,6 +124,8 @@ def train_char_gpt(
         raise ValueError("activation_checkpointing and checkpoint_every_n are mutually exclusive")
     checkpointed_indices(n_layer, checkpoint_every_n)  # validate interval
     compute_device = resolve_device(device)
+    if pin_memory and compute_device.type != "cuda":
+        raise ValueError("pin_memory requires CUDA device")
     resolve_precision(compute_device, precision)
     if history is not None:
         history.clear()
@@ -165,6 +175,10 @@ def train_char_gpt(
         controls["checkpoint_every_n"] = checkpoint_every_n
     if microbatch_size is not None:
         controls["microbatch_size"] = microbatch_size
+    if pin_memory:
+        controls["pin_memory"] = True
+    if non_blocking_transfer:
+        controls["non_blocking_transfer"] = True
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
@@ -283,6 +297,7 @@ def train_char_gpt(
                 microbatch_size=microbatch_size,
                 max_grad_norm=max_grad_norm,
                 precision=precision, scaler=scaler,
+                pin_memory=pin_memory, non_blocking=non_blocking_transfer,
             )
         elif len(microbatches) == 1:
             inputs, targets = microbatches[0]

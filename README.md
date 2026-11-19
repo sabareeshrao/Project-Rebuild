@@ -897,3 +897,38 @@ tolerances; no particular speedup or VRAM reduction is assumed.
 On CPU, tests exercise correctness and report GPU memory as unavailable.
 Actual CUDA peaks must be measured on supported hardware.
 See lessons 138–142 in `lessons/`.
+
+## CPU-to-CUDA transfer pipeline (commits 146–150)
+
+The streamed logical-batch trainer can optionally stage one whole CPU
+batch in pinned host memory, then copy individual microbatches to CUDA.
+Pinned and nonblocking copies are **opt-in**: CPU training continues to
+use the original blocking path, with no CUDA initialization required.
+
+```bash
+# Original behavior:
+python -m rebuild_gpt.train_cli --steps 2 \
+  --batch-size 5 --microbatch-size 2
+
+# Requires a CUDA-enabled PyTorch installation and compatible GPU:
+python -m rebuild_gpt.train_cli --device cuda \
+  --steps 2 --batch-size 5 --microbatch-size 2 \
+  --pin-memory --non-blocking-transfer
+
+# CPU reports sampling only; CUDA compares actual staging+copy variants:
+python examples/99_host_transfer_benchmark.py --device cpu
+python examples/99_host_transfer_benchmark.py --device cuda \
+  --iterations 20 --warmup 5 --csv out/transfers.csv
+
+python -m pytest tests/test_pinned_batch.py \
+  tests/test_microbatch_transfer.py tests/test_streamed_transfer_controls.py \
+  tests/test_host_transfer_benchmark.py \
+  tests/test_transfer_training_cli.py -q
+```
+
+Nonblocking copies use the **current CUDA stream**, without transfer/
+compute overlap on a separate stream. Pinning incurs CPU work; neither
+performance nor memory savings are guaranteed. The CLI records the
+transfer flags and checks them when resuming training-state checkpoints.
+See `lessons/143_pinned_host_memory.md` through
+`lessons/147_transfer_training_controls.md`.
