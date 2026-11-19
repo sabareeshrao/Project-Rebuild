@@ -21,7 +21,9 @@ from rebuild_gpt.memory import mebibytes
 from rebuild_gpt.microbatches import microbatch_sizes
 from rebuild_gpt.precision import make_grad_scaler, resolve_precision
 from rebuild_gpt.scaling_grid import parse_positive_sizes
-from rebuild_gpt.training import train_logical_batch_step
+from rebuild_gpt.training import (
+    train_logical_batch_step, train_streamed_logical_batch_step,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--attention-impl", choices=("fused", "sdpa"), default="sdpa")
     parser.add_argument("--logical-batch-size", type=int, default=6)
     parser.add_argument("--microbatch-sizes", default="1,2,3,6")
+    parser.add_argument("--transfer-mode", choices=("streamed", "eager"),
+                        default="streamed",
+                        help="Transfer each CPU slice separately or the whole CPU batch up front")
     parser.add_argument("--context", type=int, default=4)
     parser.add_argument("--n-embd", type=int, default=16)
     parser.add_argument("--n-head", type=int, default=4)
@@ -67,13 +72,15 @@ def main(argv: list[str] | None = None) -> int:
         attention_impl=args.attention_impl,
     )
     torch.manual_seed(args.seed + 1)
+    # Keep the logical dataset on CPU for BOTH transfer modes, so this
+    # experiment compares the memory consequences of device transfers.
     inputs = torch.randint(
         0, config.vocab_size,
-        (args.logical_batch_size, args.context), device=device,
+        (args.logical_batch_size, args.context), device="cpu",
     )
     targets = torch.randint(
         0, config.vocab_size,
-        (args.logical_batch_size, args.context), device=device,
+        (args.logical_batch_size, args.context), device="cpu",
     )
 
     rows = []
@@ -84,7 +91,18 @@ def main(argv: list[str] | None = None) -> int:
         scaler = make_grad_scaler(device, args.precision)
 
         def step():
-            return train_logical_batch_step(
+            if args.transfer_mode == "eager":
+                # This holds the entire input batch on the accelerator
+                # until the optimizer update finishes.
+                gpu_inputs = inputs.to(device)
+                gpu_targets = targets.to(device)
+                return train_logical_batch_step(
+                    model, optimizer, gpu_inputs, gpu_targets,
+                    microbatch_size=micro_size,
+                    precision=args.precision, scaler=scaler,
+                )
+            # Transfer only one slice at a time during backward.
+            return train_streamed_logical_batch_step(
                 model, optimizer, inputs, targets,
                 microbatch_size=micro_size,
                 precision=args.precision, scaler=scaler,
@@ -104,6 +122,8 @@ def main(argv: list[str] | None = None) -> int:
         tokens = args.logical_batch_size * args.context
         row = {
             "logical_batch_size": args.logical_batch_size,
+            "transfer_mode": args.transfer_mode,
+            "source_device": "cpu",
             "microbatch_size": micro_size,
             "chunks_per_step": len(microbatch_sizes(args.logical_batch_size, micro_size)),
             "context": args.context,
@@ -143,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
                 "attention_impl": args.attention_impl,
                 "logical_batch_size": args.logical_batch_size,
                 "microbatch_sizes": list(sizes),
+                "transfer_mode": args.transfer_mode,
+                "source_device": "cpu",
                 "context": args.context,
                 "n_embd": args.n_embd,
                 "n_head": args.n_head,
@@ -155,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
     print("Measurements exclude data loading; CUDA peak delta is not total VRAM.")
+    print(f"mode={args.transfer_mode}; source=CPU; compute={device}")
     return 0
 
 
