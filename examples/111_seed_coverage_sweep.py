@@ -6,6 +6,7 @@ coverage is descriptive, not an effective sample size or confidence bound.
 
 import argparse
 import csv
+import math
 from dataclasses import asdict
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import torch
 from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark_report
 from rebuild_gpt.cross_seed_overlap import analyze_cross_seed_overlap
 from rebuild_gpt.coverage_growth import analyze_coverage_growth
+from rebuild_gpt.coverage_targets import assess_coverage_target
 from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_plan
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
 from rebuild_gpt.scaling_grid import parse_positive_sizes
@@ -28,6 +30,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batches", type=int, default=2)
     parser.add_argument("--seed-counts", default="1,2,4")
     parser.add_argument("--first-seed", type=int, default=203)
+    parser.add_argument(
+        "--coverage-target", type=float, default=None,
+        help="Optional fraction in (0,1]; report when preselected seeds first reach it",
+    )
     parser.add_argument(
         "--sampling-policy",
         choices=("replacement", "disjoint", "shifted", "all"),
@@ -51,6 +57,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("seed-counts may contain at most 8 sizes, each at most 32")
         if args.context >= args.corpus_tokens:
             raise ValueError("context must be shorter than corpus-tokens")
+        if args.coverage_target is not None and (
+            not math.isfinite(args.coverage_target)
+            or not 0 < args.coverage_target <= 1
+        ):
+            raise ValueError("coverage-target must be finite and in (0, 1]")
         policies = (
             ("replacement", "disjoint", "shifted")
             if args.sampling_policy == "all" else (args.sampling_policy,)
@@ -63,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         tokens = torch.arange(args.corpus_tokens, dtype=torch.long) % 7
         rows = []
         marginal_traces = []
+        target_reports = []
         for policy in policies:
             for count in counts:
                 plans = [
@@ -82,7 +94,20 @@ def main(argv: list[str] | None = None) -> int:
                     "seed_count": count,
                     "steps": [asdict(step) for step in growth],
                 })
-                rows.append({
+                target = (
+                    assess_coverage_target(
+                        growth, corpus_token_count=args.corpus_tokens,
+                        target_fraction=args.coverage_target,
+                    )
+                    if args.coverage_target is not None else None
+                )
+                if target is not None:
+                    target_reports.append({
+                        "sampling_policy": policy,
+                        "seed_count": count,
+                        **asdict(target),
+                    })
+                row = {
                     "sampling_policy": policy,
                     "seed_count": count,
                     "latest_seed_new_positions": growth[-1].new_corpus_token_positions,
@@ -100,7 +125,15 @@ def main(argv: list[str] | None = None) -> int:
                         coverage.duplicate_starts_between_seeds,
                     "total_window_token_positions":
                         coverage.total_window_token_positions,
-                })
+                }
+                if target is not None:
+                    row.update({
+                        "coverage_target_fraction": target.target_fraction,
+                        "coverage_target_reached": target.reached,
+                        "first_reaching_seed_number": target.first_reaching_seed_number,
+                        "additional_positions_needed": target.additional_positions_needed,
+                    })
+                rows.append(row)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -130,16 +163,21 @@ def main(argv: list[str] | None = None) -> int:
                 "first_seed": args.first_seed,
                 "seed_counts": list(counts),
                 "sampling_policy": args.sampling_policy,
+                "coverage_target_fraction": args.coverage_target,
                 "contains_model_compute": False,
                 "corpus_is_synthetic": True,
             },
         )
         report["marginal_coverage"] = marginal_traces
+        if args.coverage_target is not None:
+            report["coverage_target_assessments"] = target_reports
         report["limitations"] = (            "Sampler-only synthetic CPU experiment, no GPT forward or optimizer. "
             "Seeds reuse one underlying corpus and can share token positions, "
             "even under disjoint tiling. Global coverage does not measure "
             "statistical independence or support confidence intervals. "
-            "Marginal coverage depends on the order of selected seeds."
+            "Marginal coverage depends on the order of selected seeds. "
+            "Coverage targets are retrospective design diagnostics, "
+            "not statistical stopping rules or model quality guarantees."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
