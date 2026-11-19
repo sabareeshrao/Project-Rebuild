@@ -13,6 +13,7 @@ import torch
 
 from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark_report
 from rebuild_gpt.cross_seed_overlap import analyze_cross_seed_overlap
+from rebuild_gpt.coverage_growth import analyze_coverage_growth
 from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_plan
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
 from rebuild_gpt.scaling_grid import parse_positive_sizes
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         tokens = torch.arange(args.corpus_tokens, dtype=torch.long) % 7
         rows = []
+        marginal_traces = []
         for policy in policies:
             for count in counts:
                 plans = [
@@ -74,9 +76,19 @@ def main(argv: list[str] | None = None) -> int:
                     for i in range(count)
                 ]
                 coverage = analyze_cross_seed_overlap(plans)
+                growth = analyze_coverage_growth(plans)
+                marginal_traces.append({
+                    "sampling_policy": policy,
+                    "seed_count": count,
+                    "steps": [asdict(step) for step in growth],
+                })
                 rows.append({
                     "sampling_policy": policy,
                     "seed_count": count,
+                    "latest_seed_new_positions": growth[-1].new_corpus_token_positions,
+                    "zero_new_coverage_seeds": sum(
+                        step.new_corpus_token_positions == 0 for step in growth
+                    ),
                     "global_unique_corpus_token_positions":
                         coverage.unique_corpus_token_positions,
                     "global_corpus_coverage_fraction": coverage.coverage_fraction,
@@ -122,11 +134,12 @@ def main(argv: list[str] | None = None) -> int:
                 "corpus_is_synthetic": True,
             },
         )
-        report["limitations"] = (
-            "Sampler-only synthetic CPU experiment, no GPT forward or optimizer. "
+        report["marginal_coverage"] = marginal_traces
+        report["limitations"] = (            "Sampler-only synthetic CPU experiment, no GPT forward or optimizer. "
             "Seeds reuse one underlying corpus and can share token positions, "
             "even under disjoint tiling. Global coverage does not measure "
-            "statistical independence or support confidence intervals."
+            "statistical independence or support confidence intervals. "
+            "Marginal coverage depends on the order of selected seeds."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
