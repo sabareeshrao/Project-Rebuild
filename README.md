@@ -862,3 +862,38 @@ The new `--microbatch-size` divides one batch and cannot be used
 with accumulation steps >1. The new mode's setting is saved in
 training-state controls; default-mode checkpoints remain compatible.
 See lessons 133–137 in `lessons/`.
+
+## Streamed microbatches and learning outcomes (commits 141–145)
+
+The text training path now keeps the *logical* training batch on CPU
+and transfers only the current microbatch to the compute device before
+its forward/backward pass. After processing all weighted chunks, it
+performs one optimizer update.
+
+```bash
+# Existing CLI flag now uses streaming internally:
+python -m rebuild_gpt.train_cli --steps 2 \
+  --batch-size 5 --microbatch-size 2
+
+# Compare eager full-batch transfers vs streamed transfers:
+python examples/97_microbatch_benchmark.py \
+  --logical-batch-size 6 --microbatch-sizes 1,2,6 \
+  --transfer-mode streamed --csv out/streamed.csv
+
+# Compare what the model learns at fixed logical batch/seed:
+python examples/98_compare_microbatch_learning.py \
+  --steps 3 --batch-size 5 --microbatch-sizes 1,2,5 \
+  --json out/microbatch_learning.json
+
+python -m pytest tests/test_weighted_microbatch_iterator.py \
+  tests/test_streamed_microbatch_step.py \
+  tests/test_streamed_text_training.py \
+  tests/test_streamed_microbatch_benchmark.py \
+  tests/test_microbatch_learning_comparison.py -q
+```
+
+Loss and gradient equivalence are verified within floating-point
+tolerances; no particular speedup or VRAM reduction is assumed.
+On CPU, tests exercise correctness and report GPU memory as unavailable.
+Actual CUDA peaks must be measured on supported hardware.
+See lessons 138–142 in `lessons/`.
