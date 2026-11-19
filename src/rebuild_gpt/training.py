@@ -6,6 +6,7 @@ from typing import Protocol
 import torch
 
 from rebuild_gpt.precision import autocast_context, resolve_precision
+from rebuild_gpt.transfers import stage_cpu_batch, transfer_microbatch
 from rebuild_gpt.microbatches import (
     iter_weighted_microbatches, microbatch_sizes, split_microbatches,
 )
@@ -193,6 +194,8 @@ def train_streamed_logical_batch_step(
     max_grad_norm: float | None = None,
     precision: str = "fp32",
     scaler: torch.cuda.amp.GradScaler | None = None,
+    pin_memory: bool = False,
+    non_blocking: bool = False,
 ) -> float:
     """Accumulate weighted losses while transferring one chunk at a time.
 
@@ -216,15 +219,24 @@ def train_streamed_logical_batch_step(
     ):
         raise ValueError("max_grad_norm must be finite and positive or None")
     device = _check_amp(model, precision, scaler)
+    if type(non_blocking) is not bool:
+        raise ValueError("non_blocking must be boolean")
+    if non_blocking and not pin_memory:
+        raise ValueError("non_blocking requires pin_memory=True")
+    # Stage once, not once per chunk. The default is the identity on CPU.
+    inputs, targets = stage_cpu_batch(
+        inputs, targets, device=device, pin_memory=pin_memory,
+    )
     model.train()
     optimizer.zero_grad(set_to_none=True)
     total_loss = 0.0
     for source_x, source_y, weight in iter_weighted_microbatches(
         inputs, targets, microbatch_size=microbatch_size,
     ):
-        # Do not retain the whole logical batch on the accelerator.
-        chunk_x = source_x.to(device)
-        chunk_y = source_y.to(device)
+        # Only the current slice reaches the compute device.
+        chunk_x, chunk_y = transfer_microbatch(
+            source_x, source_y, device=device, non_blocking=non_blocking,
+        )
         with autocast_context(device, precision):
             loss = model.loss(chunk_x, chunk_y)
         if scaler is None:
