@@ -1909,3 +1909,50 @@ No `passed` report is written if an assertion fails. These checks
 verify specific behavioral invariants, not full equivalence to
 upstream nanoGPT, GPT-2 training quality or generalization.
 See lessons 273–277 for pedagogical experiments and counterexamples.
+
+
+## Extended GPT model conformance (commits 285–289, lessons 278–282)
+
+The educational rebuild now checks eight independent aspects of a
+saved character-GPT checkpoint. The first four were established
+in commits 280–284: causal masking, batch isolation, masked-loss
+and inference contract, and float64 finite-difference gradient.
+
+The four new exercises verify:
+
+- **Tied embeddings:** the input table and output projection are one
+  trainable `nn.Parameter`, not equal-but-independent copies.
+- **Seeded generation:** two isolated generators yield the same token
+  IDs and do not consume global PyTorch RNG.
+- **Inference checkpoint round-trip:** model tensors, configuration,
+  vocabulary and logits survive save/reload without changes.
+- **Fused vs SDPA attention:** with identical weights and inputs,
+  manual and PyTorch attention agree on logits, loss and gradients.
+
+```bash
+python examples/120_capstone_cli.py --steps 4
+
+# Run all 8 checks:
+python -m rebuild_gpt.extended_conformance_cli \
+  --checkpoint out/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --report out/conformance/extended_conformance.json
+
+# Run each new focused test module:
+python -m pytest -q \
+  tests/test_embedding_tie_check.py \
+  tests/test_seeded_generation_check.py \
+  tests/test_checkpoint_roundtrip.py \
+  tests/test_attention_backend_parity.py \
+  tests/test_extended_conformance.py
+```
+
+The report includes per-check errors, a reproducible random seed,
+model settings, source file SHA-256 digests and the Python/PyTorch
+environment. All checks work with **local trusted** saved model
+weights; no externally obtained nanoGPT source executes.
+
+The extended suite is intended for tied-weight, fused-or-SDPA
+**CPU** models. It validates important behavioral invariants, not
+full GPT-2-scale training equivalence, model quality, or distributed
+GPU behavior. See lessons 278–282 for experiments and counterexamples.
