@@ -4,6 +4,8 @@ A microbatch split is a view of existing tensors: it changes *how*
 examples are processed, not the examples themselves.
 """
 
+from collections.abc import Iterator
+
 import torch
 
 
@@ -46,3 +48,35 @@ def split_microbatches(
         result.append((inputs[start:stop], targets[start:stop]))
         start = stop
     return result
+
+
+def iter_weighted_microbatches(
+    inputs: torch.Tensor, targets: torch.Tensor, *,
+    microbatch_size: int,
+) -> Iterator[tuple[torch.Tensor, torch.Tensor, float]]:
+    """Yield one view at a time, weighted by its number of targets.
+
+    The iterator is deliberately lazy: a caller may transfer only the
+    current chunk to an accelerator, backpropagate, then release it.
+    Weights add to 1.0, including an uneven final microbatch.
+    """
+    if (
+        not isinstance(inputs, torch.Tensor)
+        or not isinstance(targets, torch.Tensor)
+        or inputs.ndim < 1 or targets.ndim < 1
+        or inputs.size(0) < 1
+        or inputs.size(0) != targets.size(0)
+        or targets.numel() == 0
+    ):
+        raise ValueError("inputs and targets must have the same nonempty batch axis")
+    sizes = microbatch_sizes(inputs.size(0), microbatch_size)
+    total_targets = targets.numel()
+    start = 0
+    for size in sizes:
+        end = start + size
+        yield (
+            inputs[start:end],
+            targets[start:end],
+            targets[start:end].numel() / total_targets,
+        )
+        start = end
