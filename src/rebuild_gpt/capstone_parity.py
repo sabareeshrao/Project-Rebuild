@@ -40,3 +40,34 @@ def prepare_validation_parity_batch(
         targets = targets.clone()
         targets[:, -1] = -1  # Upstream forward ignores -1 loss targets.
     return inputs, targets
+
+
+def compare_capstone_forward(
+    checkpoint_path: str | Path,
+    corpus_path: str | Path,
+    upstream_model_path: str | Path,
+    *,
+    batch_size: int = 2,
+    seed: int = 29,
+) -> dict[str, int | float]:
+    """Compare saved, possibly trained GPT weights with trusted upstream code.
+
+    The explicit upstream Python file is imported and EXECUTED. Only use
+    locally reviewed source; never silently fetch a reference from the web.
+    """
+    from rebuild_gpt.text_checkpoint import load_text_checkpoint
+    from rebuild_gpt.upstream_parity import compare_against_upstream, load_upstream_model
+
+    ours, tokenizer = load_text_checkpoint(checkpoint_path)
+    inputs, targets = prepare_validation_parity_batch(
+        corpus_path, tokenizer, ours.config, batch_size=batch_size, seed=seed,
+    )
+    upstream = load_upstream_model(upstream_model_path, ours.config)
+    result = compare_against_upstream(ours, upstream, inputs, targets)
+    return {
+        "batch_size": inputs.size(0),
+        "context_length": inputs.size(1),
+        "matched_tensors": result.matched_tensors,
+        "max_logit_error": result.max_logit_error,
+        "loss_error": result.loss_error,
+    }
