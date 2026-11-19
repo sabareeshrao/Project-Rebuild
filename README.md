@@ -1397,3 +1397,47 @@ cases where **every start region was sampled but some token
 position bins remain empty**. All statistics are descriptive,
 not unbiasedness tests, independent sample counts, or model
 generalization guarantees. See lessons 213–217.
+
+## Uniform-start reweighting for balanced GPT validation (commits 224–228)
+
+A region-balanced sampler gives roughly equal numbers of eligible
+**starts** to each region. The target objective in the original
+validator averages uniformly over all eligible starts. When
+population sizes or sampled counts differ, these are different
+weighting schemes.
+
+`estimate_start_uniform_score` computes region-population
+weights for **per-window** scores, while
+`collect_window_losses` extracts next-token cross-entropy per
+sampled GPT window. `compare_balanced_window_losses` pairs two
+models on identical starts and reports raw and reweighted changes.
+
+```bash
+# Compare existing saved GPT inference checkpoints:
+python examples/114_weighted_checkpoint_comparison.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-regions 4 \
+  --csv out/stratified_paired.csv --json out/stratified_paired.json
+
+# Validate the reweighting against a synthetic exact population mean:
+python examples/115_start_uniform_toy.py \
+  --corpus-tokens 25 --context 4 --region-count 4 \
+  --batch-size 1 --eval-batches 5 \
+  --csv out/toy_weighting.csv --json out/toy_weighting.json
+
+python -m pytest tests/test_start_uniform_estimator.py \
+  tests/test_window_loss_evaluation.py \
+  tests/test_stratified_model_comparison.py \
+  tests/test_weighted_checkpoint_comparison_cli.py \
+  tests/test_start_uniform_toy.py -q
+```
+
+Commit 224 also corrects a balanced-region setting forwarded to
+unrelated sampling policies in the earlier checkpoint budget sweep;
+commit 227 corrects an invalid-region boundary test.
+
+The region-population-weighted estimate targets the mean over
+valid start positions **if sampling within each region is uniform**.
+Real GPT losses can vary inside regions, and overlapping windows
+are not statistically independent. No confidence interval or
+generalization guarantee is implied. See lessons 218–222.
