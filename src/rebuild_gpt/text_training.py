@@ -10,7 +10,6 @@ from rebuild_gpt.checkpoint_policy import checkpointed_indices
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
-from rebuild_gpt.microbatches import split_microbatches
 from rebuild_gpt.devices import resolve_device
 from rebuild_gpt.gpt import GPTLanguageModel
 from rebuild_gpt.optimizers import configure_adamw
@@ -20,7 +19,7 @@ from rebuild_gpt.evaluation import estimate_train_val_loss
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_resume import load_text_training_state, save_text_training_state
 from rebuild_gpt.tokenizer import CharTokenizer
-from rebuild_gpt.training import train_accumulated_step, train_step
+from rebuild_gpt.training import train_accumulated_step, train_step, train_streamed_logical_batch_step
 
 
 def train_char_gpt(
@@ -257,18 +256,12 @@ def train_char_gpt(
     for step in range(start_step + 1, steps + 1):
         microbatches = []
         if microbatch_size is not None:
-            # Sample ONE logical [B,T] batch, then split it before transfer.
-            # This retains the exact same examples as a normal B-sized step.
+            # The logical batch stays on CPU until each slice reaches its
+            # forward/backward pass. Preserve the original CPU RNG sampling.
             inputs, targets = sample_batch(
                 train, batch_size=batch_size, block_size=block_size,
                 generator=training_rng,
             )
-            microbatches = [
-                (part_x.to(compute_device), part_y.to(compute_device))
-                for part_x, part_y in split_microbatches(
-                    inputs, targets, microbatch_size=microbatch_size,
-                )
-            ]
         else:
             # Legacy behavior: B examples for each of A independent samples.
             for _ in range(gradient_accumulation_steps):
@@ -284,7 +277,14 @@ def train_char_gpt(
             )
             for group in optimizer.param_groups:
                 group["lr"] = last_learning_rate
-        if len(microbatches) == 1:
+        if microbatch_size is not None:
+            last_loss = train_streamed_logical_batch_step(
+                model, optimizer, inputs, targets,
+                microbatch_size=microbatch_size,
+                max_grad_norm=max_grad_norm,
+                precision=precision, scaler=scaler,
+            )
+        elif len(microbatches) == 1:
             inputs, targets = microbatches[0]
             last_loss = train_step(
                 model, optimizer, inputs, targets, max_grad_norm=max_grad_norm,
