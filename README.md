@@ -775,3 +775,30 @@ CLI behavior; real CUDA memory savings require supported GPU hardware.
 
 Read `lessons/118_attention_matrix_scaling.md` through
 `lessons/122_checkpoint_benchmark.md` for the five exercises.
+
+## Selective activation checkpointing (commits 126–130)
+
+Checkpoint only every Nth transformer block, or preserve the previous
+all-or-none setting. The new policy does not change GPT weights,
+inference checkpoint names or model architecture.
+
+```bash
+# Every second block of a four-block model:
+python -m rebuild_gpt.train_cli --steps 2 --n-layer 4 \
+  --checkpoint-every-n 2 --attention-impl sdpa
+
+# Compare off, selective, and all (CPU latency; CUDA VRAM if available):
+python examples/94_selective_checkpoint_benchmark.py \
+  --device cpu --n-layer 4 --checkpoint-every-n 2
+
+python -m pytest tests/test_checkpoint_policy.py \
+  tests/test_selective_stack.py tests/test_selective_checkpoint_parity.py \
+  tests/test_selective_training_cli.py \
+  tests/test_selective_checkpoint_benchmark.py -q
+```
+
+The selected interval is validated before training, reported by the
+CLI, and recorded in resumable training controls when active.
+Previous default-off training checkpoints remain compatible.
+See lessons `123_select_checkpoint_policy.md` through
+`127_selective_benchmark.md` for objectives and experiments.
