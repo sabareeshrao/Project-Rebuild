@@ -1825,3 +1825,47 @@ A passing result establishes deterministic restart equivalence for
 these tested CPU fp32 settings, not checkpoint authenticity, proof
 against malicious local files, or GPU/distributed training parity.
 See lessons 263–267 for explanations and exercises.
+
+
+## Audited checkpoint failure matrix (commits 275–279, lessons 268–272)
+
+The recovery lessons now distinguish missing, appended and truncated
+checkpoint failures; classify surviving restart points, and replay
+**independent** training recoveries from verified intermediate states.
+
+```bash
+# Produce an original audited CPU GPT training run:
+python examples/150_multistage_resume_audit.py
+
+# Read-only check of available intermediate checkpoints:
+python examples/161_recovery_health.py
+
+# Run all three isolated corruption/recovery scenarios in NEW folders:
+python -m rebuild_gpt.recovery_matrix_cli \
+  --source-dir out/multistage_resume \
+  --corpus data/tiny_story.txt \
+  --matrix-dir out/recovery_matrix
+
+# Or select one scenario:
+python -m rebuild_gpt.recovery_matrix_cli \
+  --modes remove --matrix-dir out/recovery_matrix_missing
+
+# Focused tests:
+python -m pytest -q tests/test_resume_health.py \
+  tests/test_recovery_drill_modes.py \
+  tests/test_recovery_drill_runner_modes.py \
+  tests/test_recovery_matrix.py \
+  tests/test_recovery_matrix_audit.py
+```
+
+The audit `out/recovery_matrix/recovery_matrix_audit.json` contains
+the source and corpus digests and the hashes of each recovered
+checkpoint and its individual successful recovery report. It is
+published only if ALL requested scenarios independently verify
+bit-for-bit training-state equality.
+
+Each scenario uses a separate disposable directory. Existing outputs
+are never overwritten; select a fresh `--matrix-dir` to rerun.
+This proves behavior only for this small CPU fp32 setting, not
+untrusted-file authenticity or distributed GPU reliability.
+Read lessons 268–272 for hands-on explanations.
