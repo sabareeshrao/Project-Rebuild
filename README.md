@@ -1732,3 +1732,51 @@ This is a small, deterministic **CPU fp32** experiment. It does not
 claim cross-hardware bitwise reproducibility, distributed training
 equivalence or complete parity with original nanoGPT's training loop.
 Load only trusted PyTorch checkpoints.
+
+
+## Verify and recover GPT resume artifacts (commits 265–269)
+
+The previous multi-interruption exercise creates `multistage_audit.json`
+with SHA-256 digests of the corpus and saved checkpoint stages. This
+phase adds a read-only verifier, an integrity-aware restart selector,
+and a controlled recovery that uses the original optimizer and RNG
+state to reach the same final CPU checkpoint.
+
+```bash
+# Prerequisite: produce checkpoints and a trusted audit
+python examples/150_multistage_resume_audit.py --stops 2,4
+
+# Read-only verification, no checkpoint deserialization or training
+python -m rebuild_gpt.resume_recovery_cli \
+  --run-dir out/multistage_resume \
+  --corpus data/tiny_story.txt --mode verify
+
+# Recover using the newest matching intermediate checkpoint
+python -m rebuild_gpt.resume_recovery_cli \
+  --run-dir out/multistage_resume \
+  --corpus data/tiny_story.txt --mode recover
+
+# New focused regression tests
+python -m pytest -q \
+  tests/test_resume_manifest.py \
+  tests/test_resume_artifacts.py \
+  tests/test_resume_recovery.py \
+  tests/test_resume_replay.py \
+  tests/test_resume_recovery_cli.py
+```
+
+For a corruption experiment, **copy** `out/multistage_resume/` to a
+different directory first. Alter a checkpoint *only in the copy* and
+run `--mode verify` (expected failure), then `--mode recover` (which
+can fall back to a still-verified earlier stage). Never destroy your
+only resume checkpoint to perform the lesson.
+
+A successful recovery writes `recovered.pt` and
+`recovery_audit.json` with the recovered checkpoint's digest. It
+reports success only after comparing recovered training state with
+the hash-verified original uninterrupted checkpoint.
+
+These checks require a trusted manifest and trusted PyTorch checkpoint
+bytes. They are not a signature/authentication system and do not
+establish GPU or distributed training reproducibility. Read lessons
+258–262 for explanations, experiments and limitations.
