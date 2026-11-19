@@ -998,3 +998,33 @@ The sampler choice is written to the CLI history and to resumable
 training controls when nondefault; old indexed-mode checkpoints
 remain compatible. No speedup is assumed. CPU and GPU execution can
 favor different strategies. See lessons 153–157 in `lessons/`.
+
+## Reusable sampled evaluation batches (commits 161–165)
+
+The trainer can now prepare **fixed CPU sampled validation batches
+once** and reuse them at each evaluation step. Since the previous
+regenerated evaluator already used the same seed each time, this
+optional optimization preserves evaluation examples and model updates.
+
+```bash
+# Train with an opt-in prepared evaluation cache:
+python -m rebuild_gpt.train_cli --steps 5 --eval-every 1 \
+  --validation-mode sampled --eval-batch-backend cached
+
+# Benchmark one-time cache setup vs repeated evaluation:
+python examples/105_cached_eval_benchmark.py \
+  --eval-batches 1,2,4 --csv out/eval_cache.csv \
+  --json out/eval_cache.json
+
+python -m pytest tests/test_eval_cache.py \
+  tests/test_prepared_evaluation.py tests/test_cached_eval_training.py \
+  tests/test_cached_eval_benchmark.py tests/test_cached_eval_cli.py -q
+```
+
+The cache retains input **and** target CPU tensors and can increase
+host RAM usage. It still transfers each evaluation batch to the
+model's compute device; a performance improvement is not guaranteed.
+The full-corpus validation mode doesn't use this cache.
+Nondefault evaluation policy is recorded in resumable training
+controls; existing default-mode checkpoints remain compatible.
+See lessons 158–162 in `lessons/`.

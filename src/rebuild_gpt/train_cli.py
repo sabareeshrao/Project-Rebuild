@@ -46,6 +46,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-every", type=int, default=10)
     parser.add_argument("--eval-batches", type=int, default=4)
     parser.add_argument("--validation-mode", choices=("sampled", "full"), default="sampled")
+    parser.add_argument("--eval-batch-backend", choices=("regenerate", "cached"),
+                        default="regenerate",
+                        help="Regenerate seeded validation batches or reuse prepared CPU batches")
     parser.add_argument("--grad-clip", type=float, default=None)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--lr-decay-steps", type=int, default=None)
@@ -67,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--pin-memory and --non-blocking-transfer require --microbatch-size")
     if args.non_blocking_transfer and not args.pin_memory:
         parser.error("--non-blocking-transfer requires --pin-memory")
+    if args.eval_batch_backend == "cached" and args.validation_mode != "sampled":
+        parser.error("--eval-batch-backend cached requires --validation-mode sampled")
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
@@ -93,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             lr_decay_steps=args.lr_decay_steps,
             min_lr=args.min_lr,
             validation_mode=args.validation_mode,
+            eval_batch_backend=args.eval_batch_backend,
             grouped_adamw=args.grouped_adamw,
             weight_decay=args.weight_decay,
             adam_betas=(args.adam_beta1, args.adam_beta2),
@@ -136,6 +142,7 @@ def main(argv: list[str] | None = None) -> int:
             "pin_memory": args.pin_memory,
             "non_blocking_transfer": args.non_blocking_transfer,
             "sampling_backend": args.sampling_backend,
+            "eval_batch_backend": args.eval_batch_backend,
             "grouped_adamw": args.grouped_adamw,
             "weight_decay": args.weight_decay if args.grouped_adamw else None,
             "adam_betas": [args.adam_beta1, args.adam_beta2] if args.grouped_adamw else None,
