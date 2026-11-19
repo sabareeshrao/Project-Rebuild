@@ -1693,3 +1693,42 @@ reproduction of original nanoGPT's complete training loop.
 The audit is written only after all checks succeed; old successful
 reports are cleared before rerunning. Torch checkpoints should only
 be loaded from trusted sources.
+
+
+## Multiple CPU GPT training restarts (commits 260–264; lessons 253–257)
+
+This next learning phase builds on the complete training-state format
+already in the repository. It now verifies **more than one interruption**
+while preserving the same training-batch RNG, AdamW moments, model
+weights, cosine learning-rate schedule and evaluation history.
+
+```bash
+# One command: uninterrupted six steps vs restarted at steps 2 and 4.
+python -m rebuild_gpt.multistage_resume_cli \
+  --corpus data/tiny_story.txt \
+  --output-dir out/multistage_resume \
+  --total-steps 6 --stops 2,4 --seed 13
+
+# Inspect the first differing field, or confirm identical state.
+python examples/148_resume_diagnostics.py
+
+# Focused tests (no original nanoGPT file required).
+python -m pytest -q \
+  tests/test_resume_milestones.py \
+  tests/test_resume_multistage.py \
+  tests/test_resume_diagnostics.py \
+  tests/test_resume_stage_verification.py \
+  tests/test_multistage_resume_audit.py \
+  tests/test_multistage_resume_cli.py
+```
+
+The command saves `uninterrupted.pt`, `after_step_0002.pt`,
+`after_step_0004.pt`, `multistage_final.pt`, and
+`multistage_audit.json` under the output directory. The audit is
+written only when all saved state and stage-identity checks pass;
+an old report is cleared before a new run to avoid stale success.
+
+This is a small, deterministic **CPU fp32** experiment. It does not
+claim cross-hardware bitwise reproducibility, distributed training
+equivalence or complete parity with original nanoGPT's training loop.
+Load only trusted PyTorch checkpoints.
