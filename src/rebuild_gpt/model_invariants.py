@@ -58,3 +58,39 @@ def check_causal_prefix(
         }
     finally:
         model.train(original_mode)
+
+
+def check_batch_independence(
+    model: GPTLanguageModel,
+    tokens: torch.Tensor,
+    *,
+    atol: float = 2e-5,
+    rtol: float = 1e-5,
+) -> dict[str, int | float]:
+    """A sample's logits must not change when other batch rows are present.
+
+    Eval mode removes per-call random dropout. This detects accidental
+    cross-example attention, normalization or batch-index dependence.
+    """
+    _validate_token_batch(model, tokens, min_batch=2)
+    original_mode = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            together = model(tokens)
+            separately = torch.cat(
+                [model(tokens[row:row + 1]) for row in range(tokens.size(0))],
+                dim=0,
+            )
+        try:
+            torch.testing.assert_close(together, separately, atol=atol, rtol=rtol)
+        except AssertionError as exc:
+            raise AssertionError(
+                "Batch independence violated: other examples changed a sample's logits"
+            ) from exc
+        return {
+            "checked_samples": tokens.size(0),
+            "max_batch_error": float((together - separately).abs().max()),
+        }
+    finally:
+        model.train(original_mode)
