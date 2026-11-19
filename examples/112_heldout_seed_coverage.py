@@ -16,6 +16,9 @@ from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark
 from rebuild_gpt.coverage_growth import analyze_coverage_growth
 from rebuild_gpt.coverage_targets import assess_coverage_target
 from rebuild_gpt.cross_seed_overlap import analyze_cross_seed_overlap
+from rebuild_gpt.position_coverage import analyze_position_coverage
+from rebuild_gpt.position_growth import analyze_position_growth
+from rebuild_gpt.position_targets import assess_position_target
 from rebuild_gpt.data import load_corpus, split_train_val
 from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_plan
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
@@ -40,6 +43,14 @@ def main(argv: list[str] | None = None) -> int:
         "--coverage-target", type=float, default=None,
         help="Optional retrospective fraction of held-out positions in (0,1]",
     )
+    parser.add_argument(
+        "--position-bins", type=int, default=None,
+        help="Optional number of held-out corpus regions to profile (up to 256)",
+    )
+    parser.add_argument(
+        "--minimum-bin-coverage", type=float, default=None,
+        help="Optional fraction each position bin must cover; requires --position-bins",
+    )
     parser.add_argument("--csv", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -61,10 +72,22 @@ def main(argv: list[str] | None = None) -> int:
             or not 0 < args.coverage_target <= 1
         ):
             raise ValueError("coverage-target must be finite and in (0,1]")
+        if args.minimum_bin_coverage is not None:
+            if args.position_bins is None:
+                raise ValueError("minimum-bin-coverage requires --position-bins")
+            if (
+                not math.isfinite(args.minimum_bin_coverage)
+                or not 0 < args.minimum_bin_coverage <= 1
+            ):
+                raise ValueError("minimum-bin-coverage must be finite and in (0,1]")
         corpus_tokens, tokenizer = load_corpus(args.corpus)
         _, heldout = split_train_val(corpus_tokens, val_fraction=0.2)
         if heldout.numel() <= args.context:
             raise ValueError("held-out split must exceed the requested context")
+        if args.position_bins is not None and not (
+            1 <= args.position_bins <= min(heldout.numel(), 256)
+        ):
+            raise ValueError("position-bins must be 1..min(held-out token count,256)")
         builders = {
             "replacement": prepare_evaluation_index_plan,
             "disjoint": prepare_disjoint_evaluation_index_plan,
@@ -75,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.sampling_policy == "all" else (args.sampling_policy,)
         )
         rows, traces = [], []
+        position_profiles, position_traces, region_targets = [], [], []
         for policy in policies:
             for count in counts:
                 plans = tuple(
@@ -112,6 +136,49 @@ def main(argv: list[str] | None = None) -> int:
                         "first_reaching_seed_number": target.first_reaching_seed_number,
                         "additional_positions_needed": target.additional_positions_needed,
                     })
+                if args.position_bins is not None:
+                    position = analyze_position_coverage(
+                        plans, position_bins=args.position_bins,
+                    )
+                    region_growth = analyze_position_growth(
+                        plans, position_bins=args.position_bins,
+                    )
+                    position_profiles.append({
+                        "sampling_policy": policy,
+                        "seed_count": count,
+                        "global_unique_positions": position.global_unique_positions,
+                        "bins": [asdict(item) for item in position.bins],
+                    })
+                    position_traces.append({
+                        "sampling_policy": policy,
+                        "seed_count": count,
+                        "steps": [asdict(step) for step in region_growth],
+                    })
+                    row.update({
+                        "position_bins": args.position_bins,
+                        "uncovered_position_bins": position.zero_coverage_bins,
+                        "least_covered_bin_fraction": min(
+                            item.coverage_fraction for item in position.bins
+                        ),
+                    })
+                    if args.minimum_bin_coverage is not None:
+                        region_goal = assess_position_target(
+                            region_growth,
+                            corpus_token_count=heldout.numel(),
+                            minimum_bin_fraction=args.minimum_bin_coverage,
+                        )
+                        region_targets.append({
+                            "sampling_policy": policy,
+                            "seed_count": count,
+                            **asdict(region_goal),
+                        })
+                        row.update({
+                            "regional_target_reached": region_goal.reached,
+                            "regions_below_target": region_goal.bins_below_target,
+                            "first_regional_reaching_seed_number": (
+                                region_goal.first_reaching_seed_number
+                            ),
+                        })
                 rows.append(row)
                 traces.append({
                     "sampling_policy": policy,
@@ -154,18 +221,27 @@ def main(argv: list[str] | None = None) -> int:
                 "seed_counts": list(counts),
                 "sampling_policy": args.sampling_policy,
                 "coverage_target_fraction": args.coverage_target,
+                "position_bins": args.position_bins,
+                "minimum_bin_coverage_fraction": args.minimum_bin_coverage,
                 "contains_model_compute": False,
                 "corpus_is_synthetic": False,
             },
         )
         report["marginal_coverage"] = traces
+        if args.position_bins is not None:
+            report["position_coverage_profiles"] = position_profiles
+            report["position_growth_traces"] = position_traces
+        if args.minimum_bin_coverage is not None:
+            report["regional_target_assessments"] = region_targets
         report["limitations"] = (
             "Sampler-only diagnostics on a contiguous held-out portion of "
             "one real UTF-8 corpus. No GPT forward or optimizer update is "
             "performed. Across-seed windows can overlap even for disjoint "
             "policies. Token coverage does not establish statistical "
             "independence, calibration, or generalization performance. "
-            "Optional coverage targets are retrospective, not stopping rules."
+            "Optional coverage targets and regional bin thresholds are "
+            "retrospective, not statistical stopping rules. Positional "
+            "bin coverage does not measure model quality."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
