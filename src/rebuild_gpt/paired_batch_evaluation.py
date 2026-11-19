@@ -16,6 +16,7 @@ from rebuild_gpt.balanced_evaluation import prepare_balanced_evaluation_index_pl
 from rebuild_gpt.start_region_diagnostics import (
     StartRegionDiagnostics, analyze_start_regions,
 )
+from rebuild_gpt.start_region_summary import StartRegionSummary, summarize_start_regions
 from rebuild_gpt.lattice_diagnostics import LatticeDiagnostics, describe_disjoint_lattice
 from rebuild_gpt.window_overlap import WindowOverlap, analyze_index_plan_overlap
 from rebuild_gpt.cross_seed_overlap import CrossSeedOverlap, analyze_cross_seed_overlap
@@ -38,6 +39,7 @@ class PairedBatchValidation:
     cross_seed_overlap: CrossSeedOverlap
     start_regions_by_seed: tuple[StartRegionDiagnostics | None, ...]
     sampling_regions: int | None
+    aggregate_start_regions: StartRegionSummary | None
 
 
 def compare_paired_batches(
@@ -127,4 +129,8 @@ def compare_paired_batches(
         cross_seed_overlap=analyze_cross_seed_overlap(plans),
         start_regions_by_seed=tuple(start_regions),
         sampling_regions=sampling_regions if sampling_policy == "balanced" else None,
+        aggregate_start_regions=(
+            summarize_start_regions(plans, region_count=sampling_regions)
+            if sampling_policy == "balanced" else None
+        ),
     )
