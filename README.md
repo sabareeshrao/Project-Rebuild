@@ -2027,3 +2027,42 @@ Read `docs/RELEASE_PREFLIGHT.md` for scope, evidence quality and
 the six-item release checklist. No success is claimed for any
 pending GitHub Actions job, opt-in upstream comparison, or
 GPT-2-scale performance benchmark.
+
+
+## Beyond the 300-commit milestone: lessons 294–297 (commits 301–304)
+
+The 300th numbered commit marks an **educational milestone**, not
+a claim of original GPT-2 model quality. The next four lessons add
+three focused numerical/context tests plus a saved-model audit:
+
+- Explicit error budgets for the nine measured conformance differences.
+- Float64 finite differences at multiple token and positional weights.
+- Long-prompt generation that crops attention while retaining the
+  entire original prompt in returned output.
+- A single CPU audit that links these checks to a hash-verified
+  conformance report and trusted saved checkpoint.
+
+```bash
+# First generate a new tiny-GPT training run and conformance report:
+python -m rebuild_gpt.release_review_cli --mode train \
+  --output-dir out/release_review
+
+# Run the new post-milestone correctness audit:
+python -m rebuild_gpt.post_milestone_cli \
+  --checkpoint out/release_review/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --conformance out/release_review/extended_conformance.json \
+  --output out/release_review/post_milestone.json
+
+# Focused tests:
+python -m pytest -q tests/test_release_evidence.py \
+  tests/test_conformance_budgets.py \
+  tests/test_gradient_coordinate_sweep.py \
+  tests/test_generation_context_check.py \
+  tests/test_post_milestone_audit.py
+```
+
+Use a fresh output directory when repeating the training step.
+A successful audit checks the documented **small CPU model** only:
+it does not verify upstream nanoGPT's entire training stack, imply
+model quality, or authenticate untrusted checkpoints.

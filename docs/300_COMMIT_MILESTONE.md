@@ -40,3 +40,11 @@ and tests for eight independent model behaviors.
 
 Subsequent numbered lessons may extend the educational work beyond
 this milestone. See `docs/RELEASE_PREFLIGHT.md` for the release workflow.
+
+## Extensions after commit 300
+
+Commits 301–304 continue learning with explicit numerical error
+budgets, multi-coordinate gradient checks, long-prompt context
+validation, and an opt-in post-milestone audit. They extend the
+original educational plan; they do not change the historical
+300th-commit milestone or imply upstream GPT-2 parity.
