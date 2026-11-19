@@ -46,10 +46,14 @@ def run_model_semantics(
             raise ValueError("This semantics lab requires tied GPT embeddings")
         if model.config.block_size < 2 or model.config.vocab_size < 2:
             raise ValueError("Model needs context and vocabulary sizes of at least 2")
-        tokens, targets = prepare_validation_parity_batch(
+        # Tied-weight gradient decomposition needs *real* targets.
+        # The ignored-target lesson instead uses a masked copy of the
+        # identical deterministic batch. Do not pass -1 to the tying check.
+        tokens, full_targets = prepare_validation_parity_batch(
             corpus_path, tokenizer, model.config, batch_size=2, seed=seed,
+            mask_last=False,
         )
-        masked_targets = targets.clone()
+        masked_targets = full_targets.clone()
         masked_targets[:, -1] = -1
 
         dropout_model = GPTLanguageModel(
@@ -58,7 +62,7 @@ def run_model_semantics(
         dropout_model.load_state_dict(model.state_dict(), strict=True)
         dropout = check_dropout_semantics(dropout_model, tokens, seed=seed)
         ignored = check_masked_target_gradients(model, tokens, masked_targets)
-        tying = check_tied_gradient_decomposition(model, tokens, targets)
+        tying = check_tied_gradient_decomposition(model, tokens, full_targets)
 
         ids = tokenizer.encode(Path(corpus_path).read_text(encoding="utf-8"))
         if len(ids) < model.config.block_size + 2:

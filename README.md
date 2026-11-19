@@ -2108,3 +2108,42 @@ uses a disposable model with nonzero dropout if the saved training
 checkpoint had dropout disabled. These are local educational
 invariants, not evidence of full original nanoGPT training parity or
 GPT-2-scale language quality.
+
+
+## Next-token loss accounting (commits 310–314, lessons 303–307)
+
+The new educational loss lab verifies four distinct properties:
+
+- Adding a common constant to every class logit changes neither
+  softmax, cross-entropy nor the logit gradients.
+- Uniform guessing among `V` tokens has loss `ln(V)` nats and
+  perplexity `V`; perplexity is `exp(mean NLL)`.
+- Every supervised token contributes to the mean; target `-1`
+  positions are ignored, not falsely recorded as zero loss.
+- Uneven microbatches require **supervised-token-weighted** loss
+  accumulation to reproduce the full-batch value and gradients.
+
+To run all four on a trusted saved tiny-GPT checkpoint:
+
+```bash
+# Produce a trained GPT if necessary (new output directory):
+python -m rebuild_gpt.release_review_cli --mode train \
+  --output-dir out/release_review
+
+# Record four independent next-token loss checks:
+python -m rebuild_gpt.next_token_loss_cli \
+  --checkpoint out/release_review/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --output out/release_review/next_token_loss.json
+
+python -m pytest -q \
+  tests/test_logit_shift_invariance.py \
+  tests/test_perplexity_reference.py \
+  tests/test_token_loss_breakdown.py \
+  tests/test_masked_microbatch_loss.py \
+  tests/test_next_token_loss_audit.py
+```
+
+The saved report identifies the exact model and corpus SHA-256 hashes.
+It verifies **local numerical properties on small held-out batches**,
+not GPT-2-scale language quality or full upstream nanoGPT equivalence.

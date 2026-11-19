@@ -98,3 +98,20 @@ def test_cli_fails_closed_when_gradient_comparison_fails(capsys):
             main([])
     assert exc.value.code == 2
     assert "gradient mismatch" in capsys.readouterr().err
+
+
+def test_tied_weight_stage_receives_real_targets_not_masked_labels(tmp_path):
+    from rebuild_gpt.tied_gradient_decomposition import (
+        check_tied_gradient_decomposition,
+    )
+
+    checkpoint, corpus = _files(tmp_path)
+    with patch(
+        "rebuild_gpt.model_semantics.check_tied_gradient_decomposition",
+        wraps=check_tied_gradient_decomposition,
+    ) as checked:
+        report = run_model_semantics(checkpoint, corpus, seed=13)
+    assert report["status"] == "passed"
+    checked.assert_called_once()
+    forwarded_targets = checked.call_args.args[2]
+    assert bool((forwarded_targets >= 0).all())
