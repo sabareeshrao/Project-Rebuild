@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 
 from rebuild_gpt.best_model import BestValidationModel
+from rebuild_gpt.checkpoint_policy import checkpointed_indices
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.corpus_evaluation import full_corpus_loss, full_train_val_loss
 from rebuild_gpt.data import load_corpus, sample_batch, split_train_val
@@ -52,6 +53,7 @@ def train_char_gpt(
     precision: str = "fp32",
     attention_impl: str = "fused",
     activation_checkpointing: bool = False,
+    checkpoint_every_n: int | None = None,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -102,6 +104,9 @@ def train_char_gpt(
         raise ValueError("attention_impl must be fused or sdpa for text training")
     if type(activation_checkpointing) is not bool:
         raise ValueError("activation_checkpointing must be boolean")
+    if activation_checkpointing and checkpoint_every_n is not None:
+        raise ValueError("activation_checkpointing and checkpoint_every_n are mutually exclusive")
+    checkpointed_indices(n_layer, checkpoint_every_n)  # validate interval
     compute_device = resolve_device(device)
     resolve_precision(compute_device, precision)
     if history is not None:
@@ -148,10 +153,15 @@ def train_char_gpt(
     # but reject a resume that changes the recomputation policy.
     if activation_checkpointing:
         controls["activation_checkpointing"] = True
+    if checkpoint_every_n is not None:
+        controls["checkpoint_every_n"] = checkpoint_every_n
 
     torch.manual_seed(seed)
     model = GPTLanguageModel(config).to(compute_device)
-    model.blocks.set_activation_checkpointing(activation_checkpointing)
+    if checkpoint_every_n is None:
+        model.blocks.set_activation_checkpointing(activation_checkpointing)
+    else:
+        model.blocks.set_checkpoint_interval(checkpoint_every_n)
     optimizer = (
         configure_adamw(
             model, learning_rate=learning_rate, weight_decay=weight_decay,

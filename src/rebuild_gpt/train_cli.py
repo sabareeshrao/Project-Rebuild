@@ -19,7 +19,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--attention-impl", choices=("fused", "sdpa"), default="fused",
                         help="Manual fused attention or PyTorch SDPA (default: fused)")
     parser.add_argument("--activation-checkpointing", action="store_true",
-                        help="Recompute transformer block activations during backward")
+                        help="Recompute every transformer block during backward")
+    parser.add_argument("--checkpoint-every-n", type=int, default=None,
+                        help="Recompute every Nth transformer block (alternative to --activation-checkpointing)")
     parser.add_argument("--steps", type=int, default=60)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-embd", type=int, default=16)
@@ -49,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--resume-from", default=None,
                         help="Continue from a trusted training-state checkpoint; --steps is the total target")
     args = parser.parse_args(argv)
+    if args.activation_checkpointing and args.checkpoint_every_n is not None:
+        parser.error("--activation-checkpointing and --checkpoint-every-n are mutually exclusive")
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
@@ -85,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
             precision=args.precision,
             attention_impl=args.attention_impl,
             activation_checkpointing=args.activation_checkpointing,
+            checkpoint_every_n=args.checkpoint_every_n,
         )
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
@@ -103,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         "training_controls": {
             "precision": args.precision,
             "activation_checkpointing": args.activation_checkpointing,
+            "checkpoint_every_n": args.checkpoint_every_n,
             "grad_clip": args.grad_clip,
             "warmup_steps": args.warmup_steps,
             "lr_decay_steps": args.lr_decay_steps,
