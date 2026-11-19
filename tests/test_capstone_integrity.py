@@ -9,6 +9,7 @@ from rebuild_gpt.capstone_integrity import verify_capstone_artifacts
 
 
 def _files(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     corpus = tmp_path / "story.txt"
     corpus.write_bytes(b"abba" * 40)
     folder = tmp_path / "run"
