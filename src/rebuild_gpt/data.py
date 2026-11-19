@@ -51,3 +51,31 @@ def sample_batch(
     offsets = torch.arange(block_size + 1, device=tokens.device)
     windows = tokens[starts[:, None] + offsets]
     return next_token_pairs(windows)
+
+
+def gather_next_token_pairs(
+    tokens: torch.Tensor,
+    starts: torch.Tensor,
+    *,
+    block_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather fixed random-start contexts, without drawing any RNG samples.
+
+    This separates random index generation from window gathering so
+    different sampling implementations can be benchmarked fairly.
+    """
+    if tokens.ndim != 1 or tokens.dtype != torch.long:
+        raise ValueError("Expected a flat torch.long token stream")
+    if (
+        starts.ndim != 1 or starts.dtype != torch.long
+        or starts.numel() < 1 or starts.device != tokens.device
+    ):
+        raise ValueError("starts must be a nonempty torch.long vector on tokens device")
+    if type(block_size) is not int or block_size < 1:
+        raise ValueError("block_size must be a positive integer")
+    if len(tokens) <= block_size:
+        raise ValueError("Need at least block_size + 1 tokens")
+    if bool((starts < 0).any()) or bool((starts >= len(tokens) - block_size).any()):
+        raise ValueError("starts must refer to complete next-token windows")
+    offsets = torch.arange(block_size + 1, device=tokens.device)
+    return next_token_pairs(tokens[starts[:, None] + offsets])
