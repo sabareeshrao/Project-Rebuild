@@ -79,3 +79,32 @@ def gather_next_token_pairs(
         raise ValueError("starts must refer to complete next-token windows")
     offsets = torch.arange(block_size + 1, device=tokens.device)
     return next_token_pairs(tokens[starts[:, None] + offsets])
+
+
+def gather_unfold_next_token_pairs(
+    tokens: torch.Tensor,
+    starts: torch.Tensor,
+    *,
+    block_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Gather next-token windows from an overlapping unfold *view*.
+
+    No full corpus-sized [N,T] matrix is materialized by unfold. The
+    indexed result copies only the requested batch. This is an
+    alternative experiment, not a guaranteed sampling speedup.
+    """
+    if tokens.ndim != 1 or tokens.dtype != torch.long:
+        raise ValueError("Expected a flat torch.long token stream")
+    if type(block_size) is not int or block_size < 1:
+        raise ValueError("block_size must be a positive integer")
+    if len(tokens) <= block_size:
+        raise ValueError("Need at least block_size + 1 tokens")
+    if (
+        starts.ndim != 1 or starts.dtype != torch.long
+        or starts.numel() == 0 or starts.device != tokens.device
+    ):
+        raise ValueError("starts must be a nonempty torch.long vector on tokens device")
+    if bool((starts < 0).any()) or bool((starts >= len(tokens) - block_size).any()):
+        raise ValueError("starts must refer to complete next-token windows")
+    windows_view = tokens.unfold(0, block_size + 1, 1)
+    return next_token_pairs(windows_view[starts])
