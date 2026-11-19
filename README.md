@@ -1565,3 +1565,49 @@ does not validate original nanoGPT's optimizer parameter grouping,
 multi-step training trajectory, distributed execution, dropout RNG
 behavior, or GPT-2-scale model quality. Source import executes Python;
 provide only personally reviewed original code. Read lessons 233–237.
+
+
+## Grouped AdamW optimization and persistent-step parity (commits 245–249)
+
+Our educational GPT now has a reproducible way to inspect **weight-decay
+parameter groups**, compare them with original nanoGPT's
+`configure_optimizers`, and measure whether multiple consecutive
+optimizer updates agree under matched weights and the same token batch.
+
+```bash
+# Understand which parameters receive decay (no reference required).
+python examples/131_optimizer_groups.py
+
+# Create a small inference checkpoint.
+python examples/120_capstone_cli.py --steps 4
+
+# Review and SHA-256-pin an original nanoGPT/model.py (runs that Python).
+sha256sum /trusted/nanoGPT/model.py
+python -m rebuild_gpt.grouped_training_audit_cli \
+  --upstream-model /trusted/nanoGPT/model.py \
+  --upstream-sha256 <actual-64-character-sha256> \
+  --steps 3 \
+  --report out/capstone/grouped_trajectory.json
+
+# Local automated tests do NOT execute original source.
+python -m pytest -q tests/test_optimizer_parity_groups.py \
+  tests/test_optimizer_parity_layout.py \
+  tests/test_grouped_step_parity.py \
+  tests/test_grouped_step_trajectory.py \
+  tests/test_grouped_training_audit.py
+```
+
+The trajectory initializes each model and optimizer once, performs
+repeated deterministic CPU steps on the **same held-out token batch**,
+and compares named gradients and updated parameters after every step.
+This is an implementation-equivalence experiment, not training on the
+held-out set for model improvement or proof of full-scale GPT-2 parity.
+
+Opt-in genuine-source test:
+`NANOGPT_MODEL_PY=/trusted/nanoGPT/model.py python -m pytest -q
+tests/test_grouped_training_opt_in.py`. It is skipped in normal CI.
+
+The report includes exact source/corpus/checkpoint hashes, PyTorch and
+Python versions, group membership counts and per-step differences.
+It only writes a new passing report after all checks succeed.
+See lessons 238–242 for explanations and experiments.
