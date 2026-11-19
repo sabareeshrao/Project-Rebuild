@@ -932,3 +932,36 @@ performance nor memory savings are guaranteed. The CLI records the
 transfer flags and checks them when resuming training-state checkpoints.
 See `lessons/143_pinned_host_memory.md` through
 `lessons/147_transfer_training_controls.md`.
+
+## Pipeline bottlenecks and scaling (commits 151–155)
+
+Separate the measured cost of sampling, CPU-to-device staging and
+model forward/backward/AdamW. The timed pipeline uses deliberate CUDA
+synchronization between stages so asynchronous launches are attributed
+to the correct work; it does **not** measure transfer/compute overlap.
+
+```bash
+# Compare identical token-window starts with two sampling methods:
+python examples/100_sampling_benchmark.py --batch-size 64 --block-size 32
+
+# Profile complete training pipeline by stage:
+python examples/101_training_pipeline_breakdown.py --device cpu \
+  --csv out/pipeline_one.csv --json out/pipeline_one.json
+
+# Sweep batch size/depth and explain the largest observed stages:
+python examples/102_pipeline_scaling_sweep.py --device cpu \
+  --batch-sizes 1,2,4 --depths 1,2 \
+  --csv out/pipeline_sweep.csv --json out/pipeline_sweep.json
+python examples/103_analyze_pipeline.py \
+  --input out/pipeline_sweep.csv --output out/pipeline_analysis.json
+
+python -m pytest tests/test_pipeline_timing.py \
+  tests/test_fixed_window_gather.py tests/test_sampling_benchmark.py \
+  tests/test_training_pipeline_breakdown.py \
+  tests/test_pipeline_scaling_sweep.py tests/test_pipeline_analysis.py -q
+```
+
+The analyzer's stage fractions are calculated using the **sum of
+stage medians**, not the median end-to-end time. Bottleneck labels
+identify investigation candidates only, and neither CUDA speedups
+nor CPU timing improvements are guaranteed. See lessons 148–152.
