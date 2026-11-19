@@ -11,6 +11,7 @@ import torch
 from rebuild_gpt.capstone_parity import prepare_validation_parity_batch
 from rebuild_gpt.grouped_step_parity import compare_grouped_adamw_trajectory
 from rebuild_gpt.text_checkpoint import load_text_checkpoint
+from rebuild_gpt.training_parity_batches import training_parity_batches
 from rebuild_gpt.upstream_parity import load_upstream_model
 
 
@@ -31,12 +32,15 @@ def audit_grouped_training_trajectory(
     batch_size: int = 2,
     learning_rate: float = 0.001,
     weight_decay: float = 0.1,
+    batch_mode: str = "fixed_validation",
 ) -> dict:
     """Never import original Python unless the exact supplied digest matches.
 
     Returns a passed report ONLY after the matched-weight multi-step
     gradient and parameter comparisons have succeeded.
     """
+    if batch_mode not in ("fixed_validation", "train_sequence"):
+        raise ValueError("batch_mode must be fixed_validation or train_sequence")
     if not isinstance(upstream_sha256, str) or re.fullmatch(
         r"[0-9a-fA-F]{64}", upstream_sha256,
     ) is None:
@@ -47,18 +51,30 @@ def audit_grouped_training_trajectory(
     corpus_hash = sha256_file(corpus_path)
 
     ours, tokenizer = load_text_checkpoint(checkpoint_path)
-    inputs, targets = prepare_validation_parity_batch(
-        corpus_path, tokenizer, ours.config, batch_size=batch_size, seed=seed,
-    )
+    if batch_mode == "train_sequence":
+        batches = training_parity_batches(
+            corpus_path, tokenizer, block_size=ours.config.block_size,
+            steps=steps, batch_size=batch_size, seed=seed,
+        )
+        inputs, targets = batches[0]
+    else:
+        inputs, targets = prepare_validation_parity_batch(
+            corpus_path, tokenizer, ours.config, batch_size=batch_size, seed=seed,
+        )
+        batches = None
     upstream = load_upstream_model(upstream_model_path, ours.config)
     comparison = compare_grouped_adamw_trajectory(
-        ours, upstream, inputs, targets, steps=steps,
+        ours, upstream, inputs, targets, steps=steps, batches=batches,
         learning_rate=learning_rate, weight_decay=weight_decay,
     )
     report = {
         "format_version": 1,
         "status": "passed",
-        "scope": "matching grouped-AdamW trajectory on a repeated held-out token batch",
+        "scope": (
+            "matching grouped-AdamW trajectory on successive TRAINING batches"
+            if batch_mode == "train_sequence" else
+            "matching grouped-AdamW trajectory on a repeated held-out token batch"
+        ),
         "sha256": {
             "upstream_model_py": upstream_sha256.lower(),
             "checkpoint": checkpoint_hash,
@@ -71,6 +87,7 @@ def audit_grouped_training_trajectory(
         "settings": {
             "steps": steps, "seed": seed, "batch_size": batch_size,
             "learning_rate": learning_rate, "weight_decay": weight_decay,
+            "batch_mode": batch_mode,
         },
         "comparison": comparison,
     }

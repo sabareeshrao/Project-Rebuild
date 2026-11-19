@@ -15,6 +15,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--corpus", default="data/tiny_story.txt")
     parser.add_argument("--report", default="out/capstone/grouped_trajectory.json")
     parser.add_argument("--steps", type=int, default=3)
+    parser.add_argument("--batch-mode", choices=("fixed_validation", "train_sequence"),
+                        default="fixed_validation",
+                        help="Use repeated validation windows or fresh training batches")
     parser.add_argument("--seed", type=int, default=29)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=0.001)
@@ -26,6 +29,7 @@ def main(argv: list[str] | None = None) -> int:
             upstream_sha256=args.upstream_sha256, output_path=args.report,
             steps=args.steps, seed=args.seed, batch_size=args.batch_size,
             learning_rate=args.learning_rate, weight_decay=args.weight_decay,
+            batch_mode=args.batch_mode,
         )
     except (ValueError, FileNotFoundError, AssertionError) as exc:
         parser.error(str(exc))

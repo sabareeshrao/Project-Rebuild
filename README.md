@@ -1611,3 +1611,43 @@ The report includes exact source/corpus/checkpoint hashes, PyTorch and
 Python versions, group membership counts and per-step differences.
 It only writes a new passing report after all checks succeed.
 See lessons 238–242 for explanations and experiments.
+
+
+## Varied-batch and optimizer-moment parity (commits 250–254)
+
+The previous grouped AdamW check repeated the same held-out window.
+This phase builds a *seeded sequence of training-only token batches*,
+then compares both GPTs over several optimizer steps while preserving
+AdamW moments.
+
+```bash
+python examples/120_capstone_cli.py --steps 4
+python examples/136_training_parity_batches.py
+
+# Run focused local tests, without executing upstream source:
+python -m pytest -q \
+  tests/test_training_parity_batches.py \
+  tests/test_varied_grouped_trajectory.py \
+  tests/test_adamw_state_parity.py \
+  tests/test_grouped_step_moments.py \
+  tests/test_varied_training_audit.py
+
+# Optional, requires a SEPARATELY OBTAINED, REVIEWED and SHA-pinned model.py:
+sha256sum /trusted/nanoGPT/model.py
+python -m rebuild_gpt.grouped_training_audit_cli \
+  --upstream-model /trusted/nanoGPT/model.py \
+  --upstream-sha256 <reviewed-source-sha256> \
+  --batch-mode train_sequence \
+  --steps 3 \
+  --report out/capstone/grouped_training_sequence.json
+```
+
+The audit records the source, checkpoint and corpus SHA-256 digests,
+the input mode and per-step **gradient, updated-weight, first-moment,
+second-moment, and step-counter errors**. By default it retains the
+older `fixed_validation` mode for backward compatibility.
+
+The unit tests use an explicit local adapter rather than representing
+that genuine upstream nanoGPT was executed. These controlled CPU
+experiments still do not establish full GPT-2 training equivalence.
+See lessons 243–247 for exercises and the distinctions.
