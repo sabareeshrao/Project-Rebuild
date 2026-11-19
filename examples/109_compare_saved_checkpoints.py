@@ -102,7 +102,14 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
         report["paired_summary"] = asdict(result.paired.per_seed_summary)
-        report["direction_diagnostics"] = asdict(result.directions)
+        directions = asdict(result.directions)
+        # Dataclass properties (total/improved_fraction) are not
+        # included by asdict; expose them explicitly for report readers.
+        for group in ("batch_directions", "seed_mean_directions"):
+            counts = directions[group]
+            counts["total"] = sum(counts[key] for key in ("improved", "worsened", "tied"))
+            counts["improved_fraction"] = counts["improved"] / counts["total"]
+        report["direction_diagnostics"] = directions
         report["limitations"] = (
             "One held-out corpus provides overlapping sampled windows. "
             "Paired differences and improvement counts are descriptive, "
