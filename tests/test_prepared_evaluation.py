@@ -64,7 +64,7 @@ def test_cached_validation_tracks_new_weights_without_recreating_token_ids():
     )
     before = evaluate_prepared_split_loss(model, plan)
     with torch.no_grad():
-        model.lm_head.weight.add_(0.05 * torch.randn_like(model.lm_head.weight))
+        model.head.linear.weight.add_(0.05 * torch.randn_like(model.head.linear.weight))
     after = evaluate_prepared_split_loss(model, plan)
     assert before != after
 
