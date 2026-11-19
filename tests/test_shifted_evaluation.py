@@ -17,7 +17,9 @@ def test_shifted_plans_repeat_exactly_and_never_overlap():
     second = prepare_shifted_evaluation_index_plan(tokens, **opts)
     assert first.tokens is tokens
     assert all(torch.equal(a, b) for a, b in zip(first.starts, second.starts))
-    assert all(torch.equal(x, y) for (x, y) in first.batches())
+    assert all(
+        torch.equal(x[:, 1:], y[:, :-1]) for x, y in first.batches()
+    )
     metrics = analyze_index_plan_overlap(first)
     assert metrics.window_count == 9
     assert metrics.duplicate_start_count == 0
