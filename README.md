@@ -1188,3 +1188,37 @@ does **not** make one corpus independent observations. Different
 seeds may choose the same tile, and a disjoint plan requires enough
 tiles for all requested windows. No statistical significance or
 generalization guarantee is implied. See lessons 183–187.
+
+## Phase-shifted disjoint validation (commits 193–197)
+
+The original sampled validation draws starts with replacement.
+Fixed-origin disjoint sampling uses nonoverlapping T+1-token tiles,
+but only from starts aligned to token zero. The new opt-in
+`shifted` policy draws a **seeded feasible lattice phase** before
+selecting distinct nonoverlapping tiles.
+
+```bash
+# Compare saved models using seed-shifted disjoint windows:
+python examples/109_compare_saved_checkpoints.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-policy shifted \
+  --csv out/shifted_comparison.csv --json out/shifted_comparison.json
+
+# Compare all three sampling distributions at multiple budgets:
+python examples/110_paired_budget_sweep.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-policy all \
+  --eval-batch-counts 1,2,4 \
+  --csv out/phase_sweep.csv --json out/phase_sweep.json
+
+python -m pytest tests/test_shifted_evaluation.py \
+  tests/test_lattice_diagnostics.py tests/test_shifted_paired_validation.py \
+  tests/test_shifted_checkpoint_cli.py tests/test_shifted_budget_sweep.py -q
+```
+
+Results record exact phases, sample budgets and overlap counts.
+Phase feasibility can change when the requested window count
+changes, so shifted budget sweeps **need not preserve sampled
+prefixes**. The shifted policy changes the sampling distribution
+and cannot by itself justify independence or unbiasedness. See
+lessons 188–192 in `lessons/`.

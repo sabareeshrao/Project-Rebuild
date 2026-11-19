@@ -24,8 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=3)
     parser.add_argument("--context", type=int, default=4)
     parser.add_argument("--eval-batch-counts", default="1,2,4")
-    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint", "both"),
-                        default="replacement", help="Compare original, disjoint, or both policies")
+    parser.add_argument(
+        "--sampling-policy",
+        choices=("replacement", "disjoint", "shifted", "both", "all"),
+        default="replacement",
+        help="Compare one policy, the original pair (both), or all three",
+    )
     parser.add_argument("--first-seed", type=int, default=187)
     parser.add_argument("--seed-count", type=int, default=3)
     parser.add_argument("--csv", default=None)
@@ -48,8 +52,13 @@ def main(argv: list[str] | None = None) -> int:
         chosen = tuple(range(args.first_seed, args.first_seed + args.seed_count))
         rows = []
         policies = (
-            ("replacement", "disjoint")
-            if args.sampling_policy == "both" else (args.sampling_policy,)
+            ("replacement", "disjoint", "shifted")
+            if args.sampling_policy == "all"
+            else (
+                ("replacement", "disjoint")
+                if args.sampling_policy == "both"
+                else (args.sampling_policy,)
+            )
         )
         for policy in policies:
             for count in counts:
@@ -64,6 +73,15 @@ def main(argv: list[str] | None = None) -> int:
                 rows.append({
                     "sampling_policy": policy,
                     "eval_batches_per_seed": count,
+                    "lattice_phases_by_seed": ",".join(
+                        str(lattice.phase) if lattice is not None else "n/a"
+                        for lattice in result.paired.lattice_by_seed
+                    ),
+                    "feasible_phase_counts_by_seed": ",".join(
+                        str(lattice.phase_count_feasible_for_budget)
+                        if lattice is not None else "n/a"
+                        for lattice in result.paired.lattice_by_seed
+                    ),
                     "seeds": args.seed_count,
                     "sampled_target_positions_per_model":
                         count * args.seed_count * args.batch_size * args.context,
@@ -115,21 +133,31 @@ def main(argv: list[str] | None = None) -> int:
                 "seed_count": args.seed_count,
                 "validation_fraction": 0.2,
                 "optimizer_updates_during_comparison": 0,
-                "sampled_windows_share_seeded_prefixes": True,
+                "sampled_windows_share_seeded_prefixes": (
+                    args.sampling_policy not in ("shifted", "all")
+                ),
+                "shifted_phase_set_can_change_with_budget": (
+                    args.sampling_policy in ("shifted", "all")
+                ),
             },
         )
         report["limitations"] = (
-            "Larger budgets reuse earlier sampled windows for each seed, "
-            "so sweep rows are dependent. Replacement and disjoint sample "
-            "different distributions; disjoint windows use a fixed T+1 "
-            "grid. All windows still come from one held-out corpus, and "
-            "different seeds may reuse tiles. Overlap totals are summed "
-            "within seeds, not globally de-duplicated. Differences are "
-            "descriptive, not calibrated confidence intervals."
+            "Replacement and fixed-origin disjoint plans reuse seeded "
+            "sampling prefixes as the budget increases. Shifted lattice "
+            "phases depend on the requested count: different budgets "
+            "need not share prefixes. Each policy samples a different "
+            "distribution; shifted and fixed policies use T+1 tiles. "
+            "All observations still come from one held-out corpus. "
+            "Overlap totals sum within-seed metrics, not global distinct "
+            "coverage. These are descriptive estimates, not calibrated "
+            "confidence intervals."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
-    print("Validation-batch counts reuse the same seeded sampling prefix.")
+    print(
+        "Replacement/fixed-disjoint budgets reuse seeded prefixes; "
+        "shifted phase feasibility can change with budget."
+    )
     return 0
 
 
