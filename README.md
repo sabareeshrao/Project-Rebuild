@@ -1475,3 +1475,48 @@ Digest matching and seeded generation replay establish artifact
 or statistical confidence. Only load checkpoints you trust.
 Read `lessons/223_capstone_settings.md` through
 `lessons/227_capstone_cli.md` for experiments and checkpoints.
+
+
+## Saved-capstone parity against original nanoGPT (commits 235–239)
+
+These five lessons use a **trained or saved** local GPT rather than the
+fresh random models in the earlier upstream parity experiments.
+They produce seeded validation input/target windows from held-out text,
+compare full forward logits and masked loss, compare sampled token IDs,
+and record the exact reference file digest after **both** checks pass.
+
+```bash
+# Prerequisite: produce a trained, self-contained local checkpoint
+python examples/120_capstone_cli.py --steps 4
+
+# Use a separately obtained and REVIEWED original nanoGPT/model.py.
+# Do not run an untrusted Python source file.
+sha256sum /trusted/nanoGPT/model.py
+
+python -m rebuild_gpt.capstone_parity_cli \
+  --checkpoint out/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --upstream-model /trusted/nanoGPT/model.py \
+  --upstream-sha256 <verified-64-character-sha256> \
+  --report out/capstone/upstream_parity.json
+
+# The focused unit tests run WITHOUT the original model.py.
+python -m pytest -q tests/test_capstone_parity_batches.py \
+  tests/test_capstone_parity_forward.py \
+  tests/test_capstone_parity_generation.py \
+  tests/test_capstone_parity_audit.py \
+  tests/test_capstone_parity_cli.py
+```
+
+You can optionally test against an explicitly supplied, trusted upstream
+file with `NANOGPT_MODEL_PY=/trusted/nanoGPT/model.py python -m pytest -q
+tests/test_capstone_parity_opt_in.py`. The opt-in test is skipped by
+default and never downloads upstream code.
+
+The JSON audit contains SHA-256 digests for the original source,
+training corpus and saved checkpoint, numerical forward comparisons,
+generation comparison and runtime versions. A mismatch raises an error
+rather than writing a new successful report. Passing matched-weight
+tests demonstrates **implementation parity for the tested inputs**,
+not GPT-2-scale training equivalence or model quality.
+Read lessons 228–232 for detailed explanations and experiments.
