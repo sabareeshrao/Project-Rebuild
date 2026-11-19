@@ -1089,3 +1089,34 @@ preserve model weights and checkpoint controls. The retained-index
 budget excludes corpus storage and temporary gathered windows.
 Benchmark medians are evaluation-only, not complete training
 latency; no performance speedup is promised. See lessons 168–172.
+
+## Sampled validation dispersion and paired comparisons (commits 178–182)
+
+This milestone adds descriptive statistics for individual sampled
+evaluation losses, including sample standard deviation and standard
+error. It also makes the per-batch losses observable for all three
+existing validation backends without changing any training behavior.
+
+```bash
+# Sample the same held-out text with several validation seeds:
+python examples/107_validation_seed_sweep.py \
+  --corpus data/tiny_story.txt --seed-count 4 \
+  --csv out/seed_sweep.csv --json out/seed_sweep.json
+
+# Compare an untrained GPT with its weights after one AdamW update,
+# using identical validation windows for both model versions:
+python examples/108_paired_validation.py \
+  --corpus data/tiny_story.txt --seed-count 3 \
+  --csv out/paired.csv --json out/paired.json
+
+python -m pytest tests/test_evaluation_stats.py \
+  tests/test_evaluation_samples.py tests/test_seed_sensitivity.py \
+  tests/test_validation_seed_sweep.py tests/test_paired_evaluation.py \
+  tests/test_paired_validation_cli.py -q
+```
+
+These comparisons describe **sampled held-out loss**, not a calibrated
+confidence interval or statistical significance. Repeated RNG seeds
+can still select overlapping windows from one corpus. The standard
+training CLI and checkpoint selection policy remain unchanged.
+See lessons 173–177 in `lessons/`.
