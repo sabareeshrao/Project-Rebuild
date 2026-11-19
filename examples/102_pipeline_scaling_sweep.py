@@ -20,12 +20,14 @@ from rebuild_gpt.precision import make_grad_scaler, resolve_precision
 from rebuild_gpt.scaling_grid import build_scaling_grid, parse_positive_sizes
 from rebuild_gpt.training import train_step
 from rebuild_gpt.transfers import transfer_microbatch
+from rebuild_gpt.window_sampler import CachedWindowSampler
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
     parser.add_argument("--precision", choices=("fp32", "bf16", "fp16"), default="fp32")
+    parser.add_argument("--sampling-backend", choices=("indexed", "cached"), default="indexed")
     parser.add_argument("--batch-sizes", default="1,2")
     parser.add_argument("--depths", default="1,2")
     parser.add_argument("--context", type=int, default=8)
@@ -63,8 +65,16 @@ def main(argv: list[str] | None = None) -> int:
         optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
         scaler = make_grad_scaler(device, args.precision)
         rng = torch.Generator().manual_seed(args.seed + 1)
+        sampler = (
+            CachedWindowSampler(tokens, block_size=item.context_length)
+            if args.sampling_backend == "cached" else None
+        )
 
         def sample():
+            if sampler is not None:
+                return sampler.sample(
+                    batch_size=item.batch_size, generator=rng,
+                )
             return sample_batch(
                 tokens, batch_size=item.batch_size,
                 block_size=item.context_length, generator=rng,
@@ -85,6 +95,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         row = {
             "device": str(device),
+            "sampling_backend": args.sampling_backend,
             "precision": args.precision,
             "batch_size": item.batch_size,
             "context": item.context_length,
@@ -120,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             settings={
                 "device_requested": args.device,
                 "precision": args.precision,
+                "sampling_backend": args.sampling_backend,
                 "batch_sizes": list(dict.fromkeys(item.batch_size for item in grid)),
                 "depths": list(dict.fromkeys(item.n_layer for item in grid)),
                 "context": args.context,

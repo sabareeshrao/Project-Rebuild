@@ -20,12 +20,14 @@ from rebuild_gpt.pipeline_timing import time_training_pipeline
 from rebuild_gpt.precision import make_grad_scaler, resolve_precision
 from rebuild_gpt.training import train_step
 from rebuild_gpt.transfers import stage_cpu_batch, transfer_microbatch
+from rebuild_gpt.window_sampler import CachedWindowSampler
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
     parser.add_argument("--precision", choices=("fp32", "bf16", "fp16"), default="fp32")
+    parser.add_argument("--sampling-backend", choices=("indexed", "cached"), default="indexed")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--block-size", type=int, default=8)
     parser.add_argument("--n-layer", type=int, default=2)
@@ -51,6 +53,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     tokens = torch.arange(8192, dtype=torch.long) % 32
+    sampler = (
+        CachedWindowSampler(tokens, block_size=args.block_size)
+        if args.sampling_backend == "cached" else None
+    )
     config = GPTConfig(
         vocab_size=32, block_size=args.block_size, n_embd=args.n_embd,
         n_head=4, n_layer=args.n_layer, attention_impl="sdpa",
@@ -71,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         generator = torch.Generator().manual_seed(args.seed + 1)
 
         def sample():
+            if sampler is not None:
+                return sampler.sample(
+                    batch_size=args.batch_size, generator=generator,
+                )
             return sample_batch(
                 tokens, batch_size=args.batch_size, block_size=args.block_size,
                 generator=generator,
@@ -93,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         tokens_per_update = args.batch_size * args.block_size
         row = {
             "mode": name,
+            "sampling_backend": args.sampling_backend,
             "device": str(device),
             "batch_size": args.batch_size,
             "block_size": args.block_size,
@@ -136,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
                 "warmup": args.warmup,
                 "seed": args.seed,
                 "attention_impl": "sdpa",
+                "sampling_backend": args.sampling_backend,
                 "measurement": "sequential_stage_timing_no_overlap",
             },
         )

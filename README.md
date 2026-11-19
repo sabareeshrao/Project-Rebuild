@@ -965,3 +965,36 @@ The analyzer's stage fractions are calculated using the **sum of
 stage medians**, not the median end-to-end time. Bottleneck labels
 identify investigation candidates only, and neither CUDA speedups
 nor CPU timing improvements are guaranteed. See lessons 148–152.
+
+## Cached token-window sampling (commits 156–160)
+
+An opt-in sampler builds a zero-copy `unfold` view of the training
+token stream once, then gathers batches from randomly selected rows.
+Repeated draws preserve the same token IDs and RNG progression as the
+original indexed sampler. **The default trainer is unchanged.**
+
+```bash
+# Run actual character-GPT training with the cached sampler:
+python -m rebuild_gpt.train_cli --steps 3 --sampling-backend cached
+
+# Compare sampling-only CPU latency over several contexts:
+python examples/104_cached_sampler_benchmark.py \
+  --batch-sizes 4,16 --contexts 4,16 \
+  --csv out/cached_sampler.csv --json out/cached_sampler.json
+
+# Then compare sampling's contribution to a complete training step:
+python examples/101_training_pipeline_breakdown.py \
+  --device cpu --sampling-backend indexed --csv out/indexed_pipeline.csv
+python examples/101_training_pipeline_breakdown.py \
+  --device cpu --sampling-backend cached --csv out/cached_pipeline.csv
+
+python -m pytest tests/test_unfold_gather.py \
+  tests/test_window_sampler.py tests/test_cached_text_training.py \
+  tests/test_cached_sampling_benchmark.py \
+  tests/test_cached_pipeline_profiles.py -q
+```
+
+The sampler choice is written to the CLI history and to resumable
+training controls when nondefault; old indexed-mode checkpoints
+remain compatible. No speedup is assumed. CPU and GPU execution can
+favor different strategies. See lessons 153–157 in `lessons/`.
