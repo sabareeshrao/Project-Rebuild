@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 
 from rebuild_gpt.benchmarks import time_operation
+from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark_report
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.devices import resolve_device
 from rebuild_gpt.gpt import GPTLanguageModel
@@ -33,7 +34,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--iterations", type=int, default=3)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--csv", default=None)
+    parser.add_argument("--json", default=None,
+                        help="Write a JSON report including environment and settings")
+    parser.add_argument("--seed", type=int, default=134)
     args = parser.parse_args(argv)
+    if args.seed < 0:
+        parser.error("seed must be nonnegative")
+    if (args.json is not None and args.csv is not None
+            and Path(args.json).resolve() == Path(args.csv).resolve()):
+        parser.error("--json and --csv must have distinct paths")
     if args.iterations < 1 or args.warmup < 0 or args.n_embd < 1:
         parser.error("iterations and n-embd must be positive; warmup nonnegative")
     dtype = {"fp32": torch.float32, "bf16": torch.bfloat16, "fp16": torch.float16}
@@ -55,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     rows = []
     for item in grid:
-        torch.manual_seed(134)  # same initial weights for matching architectures
+        torch.manual_seed(args.seed)  # same initial weights for matching architectures
         cfg = GPTConfig(
             vocab_size=32, block_size=item.context_length,
             n_embd=args.n_embd, n_head=item.n_head, n_layer=item.n_layer,
@@ -119,6 +128,27 @@ def main(argv: list[str] | None = None) -> int:
             writer.writeheader()
             writer.writerows(rows)
         print("CSV:", path)
+    if args.json is not None:
+        report = build_benchmark_report(
+            rows=rows,
+            device=device,
+            settings={
+                "seed": args.seed,
+                "device_requested": args.device,
+                "precision": args.precision,
+                "attention_impl": args.attention_impl,
+                "batch_sizes": [p.batch_size for p in grid if p.n_layer == grid[0].n_layer],
+                "depths": [p.n_layer for p in grid if p.batch_size == grid[0].batch_size],
+                "context_length": args.context,
+                "n_embd": args.n_embd,
+                "n_head": args.n_head,
+                "accumulation": args.accumulation,
+                "iterations": args.iterations,
+                "warmup": args.warmup,
+            },
+        )
+        write_benchmark_report(args.json, report)
+        print("JSON:", args.json)
     print("Measured step timing excludes data loading; no speedup is guaranteed.")
     return 0
 

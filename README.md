@@ -802,3 +802,31 @@ CLI, and recorded in resumable training controls when active.
 Previous default-off training checkpoints remain compatible.
 See lessons `123_select_checkpoint_policy.md` through
 `127_selective_benchmark.md` for objectives and experiments.
+
+## Batch, depth and context scaling (commits 131–135)
+
+These lessons separate **analytical score-matrix storage** from
+**measured training-step latency**. The workload estimator tracks
+effective tokens per optimizer update, and the grid generator produces
+bounded experiment configurations with CSV output.
+
+```bash
+# Predict attention score sizes; no model/GPU needed:
+python examples/95_scaling_grid.py --batch-sizes 1,2 \
+  --contexts 4,8,16 --depths 1,2,4 --csv out/workload_grid.csv
+
+# Measure real training steps and record reproducibility metadata:
+python examples/96_depth_batch_benchmark.py \
+  --batch-sizes 1,2 --depths 1,2 --context 8 \
+  --seed 77 --csv out/training_times.csv \
+  --json out/training_report.json
+
+python -m pytest tests/test_workload_scaling.py \
+  tests/test_scaling_grid.py tests/test_scaling_grid_cli.py \
+  tests/test_depth_batch_benchmark.py tests/test_benchmark_report.py -q
+```
+
+Both CPU and CUDA training benchmarks reuse synthetic microbatches;
+throughput excludes data loading. CSV timings and JSON metadata are
+measurement artifacts, not claims of hardware-independent speedups.
+See lessons 128–132 in `lessons/`.
