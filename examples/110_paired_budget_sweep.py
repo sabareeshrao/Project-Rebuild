@@ -70,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 directions = result.directions.seed_mean_directions
                 overlaps = result.paired.overlap_by_seed
+                across = result.paired.cross_seed_overlap
                 rows.append({
                     "sampling_policy": policy,
                     "eval_batches_per_seed": count,
@@ -83,6 +84,10 @@ def main(argv: list[str] | None = None) -> int:
                         for lattice in result.paired.lattice_by_seed
                     ),
                     "seeds": args.seed_count,
+                    "global_unique_corpus_token_positions": across.unique_corpus_token_positions,
+                    "global_corpus_coverage_fraction": across.coverage_fraction,
+                    "repeated_positions_between_seeds": across.repeated_positions_between_seeds,
+                    "duplicate_starts_between_seeds": across.duplicate_starts_between_seeds,
                     "sampled_target_positions_per_model":
                         count * args.seed_count * args.batch_size * args.context,
                     "mean_candidate_minus_baseline": result.paired.per_seed_summary.mean,
@@ -148,8 +153,11 @@ def main(argv: list[str] | None = None) -> int:
             "count: different budgets need not share prefixes. The three "
             "policies sample different distributions; shifted and fixed "
             "policies use T+1 tiles. All observations still come from one "
-            "held-out corpus. Overlap totals sum within-seed metrics, not "
-            "global distinct coverage. These are descriptive estimates, "
+            "held-out corpus. The legacy total_unique_corpus_positions_"
+            "across_seed_plans column is NOT a global union: it sums "
+            "within-seed unique coverage. Use global_unique_corpus_token_positions "
+            "for the deduplicated union and repeated_positions_between_seeds "
+            "for cross-seed reuse. These are descriptive estimates, "
             "not calibrated confidence intervals."
         )
         write_benchmark_report(args.json, report)
