@@ -1295,3 +1295,33 @@ These statistics describe **coverage of one underlying corpus**.
 They are not effective sample sizes, model performance metrics,
 calibrated confidence bounds, or statistical stopping rules.
 See lessons 198–202 in `lessons/`.
+
+## Regional validation coverage and blind-spot diagnostics (commits 209–213)
+
+An evaluation may touch many held-out token positions while
+concentrating almost all its windows in a few corpus regions.
+The new positional profiler divides validation text into
+equally spaced regions and reports unique coverage, repeated
+visits, and coverage fraction for each.
+
+```bash
+python examples/112_heldout_seed_coverage.py \
+  --corpus data/tiny_story.txt --seed-counts 1,2,4 \
+  --sampling-policy all --position-bins 8 \
+  --minimum-bin-coverage 0.5 \
+  --csv out/coverage_summary.csv \
+  --position-bin-csv out/coverage_regions.csv \
+  --json out/coverage_details.json
+
+python -m pytest tests/test_position_coverage.py \
+  tests/test_position_growth.py tests/test_position_targets.py \
+  tests/test_heldout_position_cli.py \
+  tests/test_heldout_position_csv.py -q
+```
+
+JSON preserves per-region marginal coverage gains and reports
+whether every region met the optional threshold. The new
+long-format positional CSV can be plotted by bin index.
+All samples are still drawn from a **single** held-out text:
+coverage does not establish independence, unbiasedness or
+model performance. See lessons 203–207 in `lessons/`.

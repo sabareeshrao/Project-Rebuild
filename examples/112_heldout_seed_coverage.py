@@ -51,6 +51,10 @@ def main(argv: list[str] | None = None) -> int:
         "--minimum-bin-coverage", type=float, default=None,
         help="Optional fraction each position bin must cover; requires --position-bins",
     )
+    parser.add_argument(
+        "--position-bin-csv", default=None,
+        help="Optional long-format region CSV; requires --position-bins",
+    )
     parser.add_argument("--csv", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -60,10 +64,16 @@ def main(argv: list[str] | None = None) -> int:
     ):
         parser.error("batch-size, context and eval-batches must be positive; first-seed nonnegative")
     source = Path(args.corpus).resolve()
-    outputs = [Path(p).resolve() for p in (args.csv, args.json) if p is not None]
+    outputs = [
+        Path(p).resolve()
+        for p in (args.csv, args.json, args.position_bin_csv)
+        if p is not None
+    ]
     if len(set(outputs)) != len(outputs) or source in outputs:
         parser.error("CSV and JSON outputs must differ and cannot overwrite corpus")
     try:
+        if args.position_bin_csv is not None and args.position_bins is None:
+            raise ValueError("position-bin-csv requires --position-bins")
         counts = parse_positive_sizes(args.seed_counts, label="seed-counts")
         if len(counts) > 8 or max(counts) > 32:
             raise ValueError("seed-counts supports at most eight sizes, each at most 32")
@@ -99,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         rows, traces = [], []
         position_profiles, position_traces, region_targets = [], [], []
+        position_bin_rows = []
         for policy in policies:
             for count in counts:
                 plans = tuple(
@@ -149,6 +160,17 @@ def main(argv: list[str] | None = None) -> int:
                         "global_unique_positions": position.global_unique_positions,
                         "bins": [asdict(item) for item in position.bins],
                     })
+                    position_bin_rows.extend({
+                        "sampling_policy": policy,
+                        "seed_count": count,
+                        "bin_index": item.index,
+                        "start_token_position": item.start,
+                        "stop_token_position_exclusive": item.stop,
+                        "unique_positions": item.unique_positions,
+                        "window_position_visits": item.window_position_visits,
+                        "repeated_position_visits": item.repeated_position_visits,
+                        "coverage_fraction": item.coverage_fraction,
+                    } for item in position.bins)
                     position_traces.append({
                         "sampling_policy": policy,
                         "seed_count": count,
@@ -206,6 +228,14 @@ def main(argv: list[str] | None = None) -> int:
             writer.writeheader()
             writer.writerows(rows)
         print("CSV:", destination)
+    if args.position_bin_csv is not None:
+        destination = Path(args.position_bin_csv)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(position_bin_rows[0]))
+            writer.writeheader()
+            writer.writerows(position_bin_rows)
+        print("Position-bin CSV:", destination)
     if args.json is not None:
         report = build_benchmark_report(
             rows=rows, device=torch.device("cpu"), settings={
@@ -240,8 +270,8 @@ def main(argv: list[str] | None = None) -> int:
             "policies. Token coverage does not establish statistical "
             "independence, calibration, or generalization performance. "
             "Optional coverage targets and regional bin thresholds are "
-            "retrospective, not statistical stopping rules. Positional "
-            "bin coverage does not measure model quality."
+            "retrospective, not stopping rules or statistical guarantees. "
+            "Positional bin coverage does not measure model quality."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
