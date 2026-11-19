@@ -1869,3 +1869,43 @@ are never overwritten; select a fresh `--matrix-dir` to rerun.
 This proves behavior only for this small CPU fp32 setting, not
 untrusted-file authenticity or distributed GPU reliability.
 Read lessons 268–272 for hands-on explanations.
+
+
+## GPT behavioral conformance checks (commits 280–284, lessons 273–277)
+
+After implementing training, inference, optimizer parity and restart
+recovery, this phase returns to correctness properties of the **GPT
+itself**. These tests need no imported original nanoGPT model.py:
+
+1. Causality: changing a future token cannot change earlier logits.
+2. Batch isolation: one example's logits do not depend on other rows.
+3. nanoGPT forward contract: full training logits, final-token inference
+   logits and cross-entropy ignoring target `-1`.
+4. One analytical gradient must match a central finite difference
+   evaluated on a float64 copy of the saved model.
+
+```bash
+# Create a trained checkpoint from a tiny text corpus:
+python examples/120_capstone_cli.py --steps 4
+
+# Run all four checks and save their evidence:
+python -m rebuild_gpt.model_conformance_cli \
+  --checkpoint out/capstone/model.pt \
+  --corpus data/tiny_story.txt \
+  --report out/conformance/model_conformance.json
+
+# Regression tests; includes deliberately broken model examples:
+python -m pytest -q \
+  tests/test_model_causal_invariant.py \
+  tests/test_model_batch_independence.py \
+  tests/test_model_forward_contract.py \
+  tests/test_gradient_finite_difference.py \
+  tests/test_model_conformance.py
+```
+
+The conformance report includes input/checkpoint SHA-256 hashes,
+per-check numerical errors and the Python/PyTorch versions.
+No `passed` report is written if an assertion fails. These checks
+verify specific behavioral invariants, not full equivalence to
+upstream nanoGPT, GPT-2 training quality or generalization.
+See lessons 273–277 for pedagogical experiments and counterexamples.
