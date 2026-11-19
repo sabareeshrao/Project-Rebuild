@@ -1325,3 +1325,39 @@ long-format positional CSV can be plotted by bin index.
 All samples are still drawn from a **single** held-out text:
 coverage does not establish independence, unbiasedness or
 model performance. See lessons 203–207 in `lessons/`.
+
+## Region-balanced validation sampling (commits 214–218)
+
+A new opt-in `balanced` policy samples a nearly equal number of
+window **starts** in every eligible-start region of held-out text.
+It reduces the chance of unsampled start regions, but it **changes
+the sampling distribution**, permits overlapping windows, and
+does not guarantee balanced token coverage or unbiased loss.
+
+```bash
+# Compare two saved GPTs on identical balanced start plans:
+python examples/109_compare_saved_checkpoints.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt \
+  --sampling-policy balanced --sampling-regions 4 \
+  --csv out/balanced_checkpoints.csv --json out/balanced_checkpoints.json
+
+# Compare three existing samplers plus balanced on held-out text:
+python examples/112_heldout_seed_coverage.py \
+  --corpus data/tiny_story.txt --sampling-policy extended \
+  --sampling-regions 4 --seed-counts 1,2,4 \
+  --position-bins 8 --csv out/four_policies.csv \
+  --json out/four_policies.json
+
+python -m pytest tests/test_balanced_evaluation.py \
+  tests/test_start_region_diagnostics.py \
+  tests/test_balanced_paired_evaluation.py \
+  tests/test_balanced_checkpoint_cli.py \
+  tests/test_balanced_heldout_coverage.py -q
+```
+
+Paired evaluation and checkpoint comparison still default to
+`replacement`. The held-out coverage CLI's legacy `all` still
+means three policies; `extended` explicitly selects four.
+New reports distinguish start counts from actual token coverage.
+See lessons 208–212 in `lessons/`.

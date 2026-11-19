@@ -24,6 +24,8 @@ from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_pl
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
 from rebuild_gpt.scaling_grid import parse_positive_sizes
 from rebuild_gpt.shifted_evaluation import prepare_shifted_evaluation_index_plan
+from rebuild_gpt.balanced_evaluation import prepare_balanced_evaluation_index_plan
+from rebuild_gpt.start_region_diagnostics import analyze_start_regions
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -36,8 +38,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--first-seed", type=int, default=208)
     parser.add_argument(
         "--sampling-policy",
-        choices=("replacement", "disjoint", "shifted", "all"),
+        choices=("replacement", "disjoint", "shifted", "balanced", "all", "extended"),
         default="all",
+    )
+    parser.add_argument(
+        "--sampling-regions", type=int, default=None,
+        help="Eligible-start regions for balanced sampling (or extended sweep)",
     )
     parser.add_argument(
         "--coverage-target", type=float, default=None,
@@ -74,6 +80,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.position_bin_csv is not None and args.position_bins is None:
             raise ValueError("position-bin-csv requires --position-bins")
+        if args.sampling_regions is not None and args.sampling_policy not in (
+            "balanced", "extended",
+        ):
+            raise ValueError("sampling-regions requires balanced or extended sampling-policy")
+        if args.sampling_regions is not None and args.sampling_regions < 1:
+            raise ValueError("sampling-regions must be positive")
+        region_count = args.sampling_regions if args.sampling_regions is not None else 4
         counts = parse_positive_sizes(args.seed_counts, label="seed-counts")
         if len(counts) > 8 or max(counts) > 32:
             raise ValueError("seed-counts supports at most eight sizes, each at most 32")
@@ -102,14 +115,15 @@ def main(argv: list[str] | None = None) -> int:
             "replacement": prepare_evaluation_index_plan,
             "disjoint": prepare_disjoint_evaluation_index_plan,
             "shifted": prepare_shifted_evaluation_index_plan,
+            "balanced": prepare_balanced_evaluation_index_plan,
         }
-        policies = (
-            ("replacement", "disjoint", "shifted")
-            if args.sampling_policy == "all" else (args.sampling_policy,)
-        )
+        policies = {
+            "all": ("replacement", "disjoint", "shifted"),
+            "extended": ("replacement", "disjoint", "shifted", "balanced"),
+        }.get(args.sampling_policy, (args.sampling_policy,))
         rows, traces = [], []
         position_profiles, position_traces, region_targets = [], [], []
-        position_bin_rows = []
+        position_bin_rows, start_region_profiles = [], []
         for policy in policies:
             for count in counts:
                 plans = tuple(
@@ -118,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                         block_size=args.context,
                         eval_batches=args.eval_batches,
                         seed=args.first_seed + index,
+                        **({"region_count": region_count} if policy == "balanced" else {}),
                     )
                     for index in range(count)
                 )
@@ -137,6 +152,32 @@ def main(argv: list[str] | None = None) -> int:
                     "repeated_positions_within_seeds":
                         union.repeated_positions_within_seeds,
                 }
+                if args.sampling_policy in ("balanced", "extended"):
+                    regional_starts = (
+                        tuple(
+                            analyze_start_regions(plan, region_count=region_count)
+                            for plan in plans
+                        ) if policy == "balanced" else ()
+                    )
+                    start_region_profiles.append({
+                        "sampling_policy": policy,
+                        "seed_count": count,
+                        "seeds": [
+                            {"seed": plan.seed, **asdict(stats)}
+                            for plan, stats in zip(plans, regional_starts)
+                        ],
+                    })
+                    row.update({
+                        "sampling_regions": region_count if regional_starts else None,
+                        "empty_start_regions_across_seeds": (
+                            sum(item.empty_regions for item in regional_starts)
+                            if regional_starts else None
+                        ),
+                        "maximum_start_region_imbalance": (
+                            max(item.imbalance for item in regional_starts)
+                            if regional_starts else None
+                        ),
+                    })
                 if args.coverage_target is not None:
                     target = assess_coverage_target(
                         growth, corpus_token_count=heldout.numel(),
@@ -250,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
                 "first_seed": args.first_seed,
                 "seed_counts": list(counts),
                 "sampling_policy": args.sampling_policy,
+                "sampling_regions": (
+                    region_count
+                    if args.sampling_policy in ("balanced", "extended") else None
+                ),
                 "coverage_target_fraction": args.coverage_target,
                 "position_bins": args.position_bins,
                 "minimum_bin_coverage_fraction": args.minimum_bin_coverage,
@@ -258,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
         report["marginal_coverage"] = traces
+        if args.sampling_policy in ("balanced", "extended"):
+            report["start_region_profiles"] = start_region_profiles
         if args.position_bins is not None:
             report["position_coverage_profiles"] = position_profiles
             report["position_growth_traces"] = position_traces
@@ -269,6 +316,9 @@ def main(argv: list[str] | None = None) -> int:
             "performed. Across-seed windows can overlap even for disjoint "
             "policies. Token coverage does not establish statistical "
             "independence, calibration, or generalization performance. "
+            "The balanced policy equalizes start counts across regions, "
+            "not token coverage, and changes the sampling distribution. "
+            "Its start counts can be uniform while contexts overlap. "
             "Optional coverage targets and regional bin thresholds are "
             "retrospective, not stopping rules or statistical guarantees. "
             "Positional bin coverage does not measure model quality."
