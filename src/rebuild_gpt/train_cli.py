@@ -7,6 +7,7 @@ from pathlib import Path
 
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_training import train_char_gpt
+from rebuild_gpt.eval_cache_budget import estimate_evaluation_cache_budget
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -49,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batch-backend", choices=("regenerate", "cached"),
                         default="regenerate",
                         help="Regenerate seeded validation batches or reuse prepared CPU batches")
+    parser.add_argument("--eval-cache-max-mib", type=float, default=None,
+                        help="Optional conservative CPU byte budget (MiB) for cached sampled evaluation")
     parser.add_argument("--grad-clip", type=float, default=None)
     parser.add_argument("--warmup-steps", type=int, default=0)
     parser.add_argument("--lr-decay-steps", type=int, default=None)
@@ -72,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--non-blocking-transfer requires --pin-memory")
     if args.eval_batch_backend == "cached" and args.validation_mode != "sampled":
         parser.error("--eval-batch-backend cached requires --validation-mode sampled")
+    if args.eval_cache_max_mib is not None and args.eval_batch_backend != "cached":
+        parser.error("--eval-cache-max-mib requires --eval-batch-backend cached")
 
     paths = [Path(args.output).resolve(), Path(args.best_output).resolve(),
              Path(args.history_file).resolve()]
@@ -99,6 +104,7 @@ def main(argv: list[str] | None = None) -> int:
             min_lr=args.min_lr,
             validation_mode=args.validation_mode,
             eval_batch_backend=args.eval_batch_backend,
+            eval_cache_max_mib=args.eval_cache_max_mib,
             grouped_adamw=args.grouped_adamw,
             weight_decay=args.weight_decay,
             adam_betas=(args.adam_beta1, args.adam_beta2),
@@ -143,6 +149,14 @@ def main(argv: list[str] | None = None) -> int:
             "non_blocking_transfer": args.non_blocking_transfer,
             "sampling_backend": args.sampling_backend,
             "eval_batch_backend": args.eval_batch_backend,
+            "eval_cache_max_mib": args.eval_cache_max_mib,
+            "eval_cache_estimated_logical_bytes": (
+                estimate_evaluation_cache_budget(
+                    batch_size=args.batch_size, block_size=args.block_size,
+                    eval_batches=args.eval_batches,
+                ).total_bytes
+                if args.eval_batch_backend == "cached" else None
+            ),
             "grouped_adamw": args.grouped_adamw,
             "weight_decay": args.weight_decay if args.grouped_adamw else None,
             "adam_betas": [args.adam_beta1, args.adam_beta2] if args.grouped_adamw else None,
