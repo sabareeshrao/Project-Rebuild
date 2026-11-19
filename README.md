@@ -1956,3 +1956,41 @@ The extended suite is intended for tied-weight, fused-or-SDPA
 **CPU** models. It validates important behavioral invariants, not
 full GPT-2-scale training equivalence, model quality, or distributed
 GPU behavior. See lessons 278–282 for experiments and counterexamples.
+
+
+## Independently review GPT conformance evidence (commits 290–294)
+
+The four- and eight-check GPT audits now have an additional review
+layer. New lessons 283–287 validate the report's JSON structure,
+verify checkpoint/corpus hashes **without loading PyTorch files**,
+independently rerun the eight measurements, and test the model under
+more than one deterministic held-out batch seed.
+
+```bash
+python examples/120_capstone_cli.py --steps 4
+python -m rebuild_gpt.extended_conformance_cli
+
+# Hash-only verification; doesn't deserialize the .pt file:
+python -m rebuild_gpt.conformance_review_cli --mode verify
+
+# Rerun eight checks on a trusted checkpoint and compare measurements:
+python -m rebuild_gpt.conformance_review_cli --mode reproduce
+
+# Broader deterministic held-out batch coverage, with a separate report:
+python -m rebuild_gpt.conformance_review_cli \
+  --mode sweep --seed-sweep 11,29 \
+  --output out/conformance/seed_sweep.json
+
+# New regression tests
+python -m pytest -q \
+  tests/test_conformance_report.py \
+  tests/test_conformance_integrity.py \
+  tests/test_conformance_reproduction.py \
+  tests/test_conformance_seed_sweep.py \
+  tests/test_conformance_review_cli.py
+```
+
+A saved report does not prove that a model is faithful to upstream
+nanoGPT or has GPT-2-level model quality. Read
+`docs/MILESTONE_AUDIT.md` for a clear separation between implemented
+features, repeatable evidence and remaining verification work.
