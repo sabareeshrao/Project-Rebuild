@@ -3,6 +3,7 @@
 import torch
 
 from rebuild_gpt.data import sample_batch
+from rebuild_gpt.eval_cache import PreparedEvaluationBatches
 from rebuild_gpt.gpt import GPTLanguageModel
 
 
@@ -68,4 +69,43 @@ def estimate_train_val_loss(
             model, val_tokens, batch_size=batch_size, block_size=block_size,
             eval_batches=eval_batches, seed=seed + 1,
         ),
+    }
+
+
+def evaluate_prepared_split_loss(
+    model: GPTLanguageModel,
+    prepared: PreparedEvaluationBatches,
+) -> float:
+    """Evaluate fixed CPU batches while preserving mode and RNG.
+
+    Only batch generation is cached; device transfers and model forward
+    passes still occur on every call to reflect current model weights.
+    """
+    if not isinstance(prepared, PreparedEvaluationBatches) or not prepared.batches:
+        raise ValueError("prepared must contain nonempty evaluation batches")
+    if prepared.block_size > model.config.block_size:
+        raise ValueError("block_size exceeds the model context window")
+    device = next(model.parameters()).device
+    was_training = model.training
+    try:
+        model.eval()
+        with torch.no_grad():
+            losses = [
+                model.loss(inputs.to(device), targets.to(device)).item()
+                for inputs, targets in prepared.batches
+            ]
+        return sum(losses) / len(losses)
+    finally:
+        model.train(was_training)
+
+
+def evaluate_prepared_train_val_loss(
+    model: GPTLanguageModel,
+    train: PreparedEvaluationBatches,
+    validation: PreparedEvaluationBatches,
+) -> dict[str, float]:
+    """Evaluate train/validation using independent cached batch plans."""
+    return {
+        "train_loss": evaluate_prepared_split_loss(model, train),
+        "validation_loss": evaluate_prepared_split_loss(model, validation),
     }
