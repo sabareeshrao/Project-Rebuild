@@ -6,15 +6,20 @@ occur during the experiment. Results depend on hardware and shape.
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 import torch
 
 from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark_report
 from rebuild_gpt.benchmarks import time_operation
+from rebuild_gpt.cache_economics import minimum_break_even_evaluations, estimated_net_savings_ms
+from rebuild_gpt.eval_cache_budget import (
+    estimate_evaluation_cache_budget, enforce_evaluation_cache_budget,
+)
 from rebuild_gpt.config import GPTConfig
 from rebuild_gpt.devices import resolve_device
-from rebuild_gpt.eval_cache import prepare_evaluation_batches
+from rebuild_gpt.eval_cache import prepare_train_val_evaluation_batches
 from rebuild_gpt.evaluation import (
     estimate_train_val_loss, evaluate_prepared_train_val_loss,
 )
@@ -26,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", choices=("cpu", "cuda", "auto"), default="cpu")
     parser.add_argument("--eval-batches", default="1,2,4")
+    parser.add_argument("--eval-cache-max-mib", type=float, default=None,
+                        help="Reject requested shapes exceeding this combined CPU cache budget")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--context", type=int, default=4)
     parser.add_argument("--warmup", type=int, default=1)
@@ -42,6 +49,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         counts = parse_positive_sizes(args.eval_batches, label="eval-batches")
         device = resolve_device(args.device)
+        max_bytes = None
+        if args.eval_cache_max_mib is not None:
+            if not math.isfinite(args.eval_cache_max_mib) or args.eval_cache_max_mib <= 0:
+                raise ValueError("eval-cache-max-mib must be finite and positive")
+            max_bytes = int(args.eval_cache_max_mib * (1024 * 1024))
+            if max_bytes < 1:
+                raise ValueError("eval-cache-max-mib must permit at least one byte")
+        # Check EVERY shape before model construction or any batch sampling.
+        for count in counts:
+            estimate = estimate_evaluation_cache_budget(
+                batch_size=args.batch_size, block_size=args.context,
+                eval_batches=count,
+            )
+            enforce_evaluation_cache_budget(estimate.total_bytes, max_bytes)
     except ValueError as exc:
         parser.error(str(exc))
 
@@ -57,17 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     rows = []
     for count in counts:
         def prepare():
-            return (
-                prepare_evaluation_batches(
-                    train, batch_size=args.batch_size,
-                    block_size=args.context, eval_batches=count,
-                    seed=args.seed + 2,
-                ),
-                prepare_evaluation_batches(
-                    val, batch_size=args.batch_size,
-                    block_size=args.context, eval_batches=count,
-                    seed=args.seed + 3,
-                ),
+            return prepare_train_val_evaluation_batches(
+                train, val, batch_size=args.batch_size,
+                block_size=args.context, eval_batches=count,
+                seed=args.seed + 2, max_bytes=max_bytes,
             )
 
         timing_prepare = time_operation(
@@ -96,8 +110,21 @@ def main(argv: list[str] | None = None) -> int:
             lambda: evaluate_prepared_train_val_loss(model, cached_train, cached_val),
             device=device, warmup=args.warmup, iterations=args.iterations,
         )
+        break_even = minimum_break_even_evaluations(
+            preparation_ms=timing_prepare.median_ms,
+            regenerated_ms=original_time.median_ms,
+            cached_ms=cached_time.median_ms,
+        )
         row = {
             "device": str(device),
+            "cache_budget_mib": args.eval_cache_max_mib,
+            "break_even_evaluation_events": break_even,
+            "estimated_net_savings_10_events_ms": estimated_net_savings_ms(
+                preparation_ms=timing_prepare.median_ms,
+                regenerated_ms=original_time.median_ms,
+                cached_ms=cached_time.median_ms,
+                evaluation_events=10,
+            ),
             "batch_size": args.batch_size,
             "context": args.context,
             "eval_batches_per_split": count,
@@ -114,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             f"eval_batches={count} prepare={timing_prepare.median_ms:.3f}ms "
             f"regenerate={original_time.median_ms:.3f}ms "
             f"cached={cached_time.median_ms:.3f}ms "
-            f"CPU_cache={row['plan_storage_bytes']} bytes"
+            f"CPU_cache={row['plan_storage_bytes']} bytes "
+            f"break_even={break_even if break_even is not None else 'not reached'}"
         )
     if args.csv is not None:
         path = Path(args.csv)
@@ -137,11 +165,14 @@ def main(argv: list[str] | None = None) -> int:
                 "seed": args.seed,
                 "measurement": "evaluation_only_no_optimizer",
                 "preparation_reported_separately": True,
+                "eval_cache_max_mib": args.eval_cache_max_mib,
+                "break_even_is_estimate": True,
             },
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
     print("The cache trades host RAM for CPU sampling work; speedup is not guaranteed.")
+    print("Break-even calculations use measured medians, not guaranteed future savings.")
     return 0
 
 

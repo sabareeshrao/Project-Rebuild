@@ -56,3 +56,37 @@ def test_csv_json_collision_is_rejected(tmp_path):
     assert result.returncode == 2
     assert "distinct paths" in result.stderr
     assert not path.exists()
+
+
+def test_budgeted_benchmark_reports_break_even_and_analytic_bytes(tmp_path):
+    output = tmp_path / "budget.csv"
+    report = tmp_path / "budget.json"
+    result = run(
+        "--eval-cache-max-mib", "0.001",
+        "--csv", str(output), "--json", str(report),
+    )
+    assert result.returncode == 0, result.stderr
+    with output.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 2
+    assert all(row["cache_budget_mib"] == "0.001" for row in rows)
+    assert all(row["estimated_net_savings_10_events_ms"] for row in rows)
+    assert all(
+        row["break_even_evaluation_events"] == ""
+        or int(row["break_even_evaluation_events"]) >= 1
+        for row in rows
+    )
+    data = json.loads(report.read_text(encoding="utf-8"))
+    assert data["settings"]["eval_cache_max_mib"] == 0.001
+    assert data["settings"]["break_even_is_estimate"] is True
+    assert "Break-even calculations" in result.stdout
+
+
+def test_cache_budget_rejected_before_benchmark_outputs(tmp_path):
+    output = tmp_path / "too_small.csv"
+    result = run(
+        "--eval-cache-max-mib", "0.00001", "--csv", str(output),
+    )
+    assert result.returncode == 2
+    assert "exceeding max_bytes" in result.stderr
+    assert not output.exists()

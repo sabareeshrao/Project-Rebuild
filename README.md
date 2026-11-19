@@ -1028,3 +1028,35 @@ The full-corpus validation mode doesn't use this cache.
 Nondefault evaluation policy is recorded in resumable training
 controls; existing default-mode checkpoints remain compatible.
 See lessons 158–162 in `lessons/`.
+
+## Budgeted evaluation caching and break-even (commits 167–171)
+
+The opt-in sampled evaluation cache can now be bounded by a
+conservative CPU memory budget. The budget covers the retained
+logical input/target bytes across both evaluation splits; it does
+**not** measure total process RSS or GPU VRAM.
+
+```bash
+# Bound the cache and record its estimated size in the training report:
+python -m rebuild_gpt.train_cli --steps 5 --eval-every 1 \
+  --eval-batch-backend cached --eval-cache-max-mib 16
+
+# Measure setup overhead, repeated evaluation latency and break-even:
+python examples/105_cached_eval_benchmark.py \
+  --eval-batches 1,2,4 --eval-cache-max-mib 16 \
+  --csv out/eval_budget.csv --json out/eval_budget.json
+
+python -m pytest tests/test_eval_cache_budget.py \
+  tests/test_eval_cache_limits.py tests/test_eval_cache_training_budget.py \
+  tests/test_eval_cache_budget_cli.py tests/test_cache_economics.py \
+  tests/test_cached_eval_benchmark.py -q
+```
+
+The estimate counts both logical input and target elements. In our
+sampler they can share a base allocation, making this estimate
+conservative. The cap is optional and recorded in resumable
+training-state controls when enabled; a mismatch stops resumption.
+An oversized plan fails *before* sampling either split.
+
+Break-even calculations from benchmark medians are illustrative,
+not guaranteed speedups. See lessons 163–167 in `lessons/`.
