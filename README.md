@@ -1441,3 +1441,37 @@ valid start positions **if sampling within each region is uniform**.
 Real GPT losses can vary inside regions, and overlapping windows
 are not statistically independent. No confidence interval or
 generalization guarantee is implied. See lessons 218–222.
+
+
+## Reproducible CPU GPT capstone (commits 230–234, lessons 223–227)
+
+This is a **learning demonstration**, not a claim of GPT-2-scale training.
+The new capstone uses the established `train_char_gpt`, checkpoint, and
+generation functions rather than duplicating their implementations.
+
+From the repository root after installing `.[dev]`:
+
+```bash
+# One command: train a small GPT, save checkpoint/vocab, generate text,
+# write a JSON manifest and verify the result (CPU; no GPU needed).
+python examples/120_capstone_cli.py --steps 4 --seed 7 \
+  --corpus data/tiny_story.txt --output-dir out/capstone
+
+# Later or in a fresh process: verify data/checkpoint digests and replay
+# the saved generation. This does NOT perform any optimizer steps.
+python examples/120_capstone_cli.py --verify-only \
+  --corpus data/tiny_story.txt --output-dir out/capstone
+
+# Focused automated checks
+python -m pytest -q tests/test_capstone_spec.py tests/test_capstone.py \
+  tests/test_capstone_bundle.py tests/test_capstone_verification.py \
+  tests/test_capstone_cli.py
+```
+
+`out/capstone/` contains `model.pt`, `sample.txt` and `run.json`.
+The manifest captures settings, metrics and SHA-256 digests.
+Digest matching and seeded generation replay establish artifact
+**consistency**, not model quality, cross-version bitwise reproducibility,
+or statistical confidence. Only load checkpoints you trust.
+Read `lessons/223_capstone_settings.md` through
+`lessons/227_capstone_cli.md` for experiments and checkpoints.
