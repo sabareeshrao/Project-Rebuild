@@ -1222,3 +1222,39 @@ changes, so shifted budget sweeps **need not preserve sampled
 prefixes**. The shifted policy changes the sampling distribution
 and cannot by itself justify independence or unbiasedness. See
 lessons 188–192 in `lessons/`.
+
+## Global validation coverage across seeds (commits 199–203)
+
+A nonoverlapping validation plan may have zero repeated token
+positions *within one seed* while sharing the same windows with
+other seeds. We now separate within-seed and between-seed
+repetitions, and report the true global union of touched tokens.
+
+```bash
+# Show global coverage when comparing saved GPT checkpoints:
+python examples/109_compare_saved_checkpoints.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-policy shifted \
+  --json out/paired_global_coverage.json
+
+# Compare global token coverage over a larger number of seeds:
+python examples/111_seed_coverage_sweep.py \
+  --corpus-tokens 2048 --batch-size 4 --context 16 \
+  --seed-counts 1,2,4,8 --sampling-policy all \
+  --csv out/seed_coverage.csv --json out/seed_coverage.json
+
+python -m pytest tests/test_cross_seed_overlap.py \
+  tests/test_paired_cross_seed_overlap.py \
+  tests/test_cross_seed_checkpoint_cli.py \
+  tests/test_cross_seed_budget_sweep.py \
+  tests/test_seed_coverage_sweep.py -q
+```
+
+The previous per-seed overlap fields remain available. In the
+policy sweep, the legacy summed unique-coverage field is **not**
+a globally deduplicated count; use the new
+`global_unique_corpus_token_positions` field instead.
+
+These are reproducible coverage diagnostics, not statistical
+independence tests or generalization guarantees. See lessons
+193–197 in `lessons/`.
