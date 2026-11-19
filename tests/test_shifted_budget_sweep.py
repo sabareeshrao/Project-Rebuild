@@ -93,7 +93,7 @@ def test_original_both_option_keeps_prefix_guarantee(tmp_path):
     )
     assert proc.returncode == 0, proc.stderr
     report = json.loads(json_file.read_text(encoding="utf-8"))
-    assert len(report["rows"]) == 4
+    assert len(report["results"]) == 4
     assert report["settings"]["sampled_windows_share_seeded_prefixes"] is True
 
 

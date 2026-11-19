@@ -143,20 +143,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         report["limitations"] = (
             "Replacement and fixed-origin disjoint plans reuse seeded "
-            "sampling prefixes as the budget increases. Shifted lattice "
-            "phases depend on the requested count: different budgets "
-            "need not share prefixes. Each policy samples a different "
-            "distribution; shifted and fixed policies use T+1 tiles. "
-            "All observations still come from one held-out corpus. "
-            "Overlap totals sum within-seed metrics, not global distinct "
-            "coverage. These are descriptive estimates, not calibrated "
-            "confidence intervals."
+            "sampling prefixes as the budget increases, so their rows "
+            "are dependent. Shifted lattice phases depend on the requested "
+            "count: different budgets need not share prefixes. The three "
+            "policies sample different distributions; shifted and fixed "
+            "policies use T+1 tiles. All observations still come from one "
+            "held-out corpus. Overlap totals sum within-seed metrics, not "
+            "global distinct coverage. These are descriptive estimates, "
+            "not calibrated confidence intervals."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
     print(
-        "Replacement/fixed-disjoint budgets reuse seeded prefixes; "
-        "shifted phase feasibility can change with budget."
+        "Replacement/fixed-disjoint budgets reuse the same seeded "
+        "sampling prefix; shifted phase feasibility can change with budget."
     )
     return 0
 
