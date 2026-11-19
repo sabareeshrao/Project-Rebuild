@@ -24,8 +24,8 @@ def options():
 
 def test_sufficient_cache_budget_matches_uncapped_evaluation(tmp_path):
     text = corpus(tmp_path)
-    # 2 splits × 2 (inputs + targets) × 4 × 3 × 2 × 8 = 384 bytes.
-    bound_mib = 384 / (1024 * 1024)
+    # 2 splits × 2 (inputs + targets) × 4 × 3 × 2 × 8 = 768 bytes.
+    bound_mib = 768 / (1024 * 1024)
     reference_history, bounded_history = [], []
     original, _, a = train_char_gpt(
         text, history=reference_history, **options(),
@@ -58,7 +58,7 @@ def test_resume_requires_same_byte_budget(tmp_path):
     state = tmp_path / "saved.pt"
     args = options()
     args["steps"] = 2
-    budget = 384 / (1024 * 1024)
+    budget = 768 / (1024 * 1024)
     train_char_gpt(
         text, eval_cache_max_mib=budget,
         training_state_path=state, **args,
