@@ -25,6 +25,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batches", type=int, default=3)
     parser.add_argument("--first-seed", type=int, default=186)
     parser.add_argument("--seed-count", type=int, default=3)
+    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint"),
+                        default="replacement", help="Original random starts or nonoverlapping T+1 tiles")
     parser.add_argument("--csv", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -44,18 +46,24 @@ def main(argv: list[str] | None = None) -> int:
             seeds=tuple(range(args.first_seed, args.first_seed + args.seed_count)),
             batch_size=args.batch_size, block_size=args.context,
             eval_batches=args.eval_batches, device=args.device,
+            sampling_policy=args.sampling_policy,
         )
     except (ValueError, OSError, RuntimeError) as exc:
         parser.error(str(exc))
 
     rows = []
-    for seed, baseline_loss, candidate_loss, delta, batch_deltas in zip(
+    for seed, baseline_loss, candidate_loss, delta, batch_deltas, overlap in zip(
         result.paired.seeds, result.paired.baseline_losses,
         result.paired.candidate_losses,
         result.paired.per_seed_means, result.paired.differences,
+        result.paired.overlap_by_seed,
     ):
         rows.append({
             "seed": seed,
+            "sampling_policy": args.sampling_policy,
+            "duplicate_starts": overlap.duplicate_start_count,
+            "repeated_window_token_positions": overlap.repeated_window_token_positions,
+            "unique_corpus_token_positions": overlap.unique_corpus_token_positions,
             "baseline_mean_loss": sum(baseline_loss) / len(baseline_loss),
             "candidate_mean_loss": sum(candidate_loss) / len(candidate_loss),
             "candidate_minus_baseline": delta,
@@ -97,11 +105,16 @@ def main(argv: list[str] | None = None) -> int:
                 "eval_batches_per_seed": args.eval_batches,
                 "first_seed": args.first_seed,
                 "seed_count": args.seed_count,
+                "sampling_policy": args.sampling_policy,
                 "validation_fraction": 0.2,
                 "optimizer_updates_during_comparison": 0,
             },
         )
         report["paired_summary"] = asdict(result.paired.per_seed_summary)
+        report["window_overlap_by_seed"] = [
+            {"seed": seed, **asdict(overlap)}
+            for seed, overlap in zip(result.paired.seeds, result.paired.overlap_by_seed)
+        ]
         directions = asdict(result.directions)
         # Dataclass properties (total/improved_fraction) are not
         # included by asdict; expose them explicitly for report readers.
@@ -111,9 +124,11 @@ def main(argv: list[str] | None = None) -> int:
             counts["improved_fraction"] = counts["improved"] / counts["total"]
         report["direction_diagnostics"] = directions
         report["limitations"] = (
-            "One held-out corpus provides overlapping sampled windows. "
-            "Paired differences and improvement counts are descriptive, "
-            "not independent observations or a significance test."
+            "With-replacement windows can overlap; disjoint windows use "
+            "a fixed T+1 tiling that changes the sampling distribution. "
+            "All samples still come from one held-out corpus. Paired "
+            "differences and improvement counts are descriptive, not "
+            "independent trials or statistical significance tests."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
