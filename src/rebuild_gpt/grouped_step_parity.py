@@ -1,5 +1,6 @@
 """Compare a real nanoGPT-style grouped AdamW update at matched weights."""
 
+from collections.abc import Sequence
 import math
 
 import torch
@@ -75,6 +76,7 @@ def compare_grouped_adamw_trajectory(
     ours, upstream, inputs: torch.Tensor, targets: torch.Tensor,
     *, steps: int = 3, learning_rate: float = 0.001, weight_decay: float = 0.1,
     atol: float = 2e-5, rtol: float = 1e-5,
+    batches: Sequence[tuple[torch.Tensor, torch.Tensor]] | None = None,
 ) -> dict:
     """Compare repeated steps with PERSISTENT AdamW optimizer state.
 
@@ -97,6 +99,22 @@ def compare_grouped_adamw_trajectory(
         raise ValueError("inputs and targets must be non-empty [B,T] long tensors")
     if not callable(getattr(upstream, "configure_optimizers", None)):
         raise ValueError("Reference must implement configure_optimizers()")
+    if batches is None:
+        step_pairs = tuple((inputs, targets) for _ in range(steps))
+    else:
+        if not isinstance(batches, (tuple, list)) or len(batches) != steps:
+            raise ValueError("batches must have exactly one pair per step")
+        step_pairs = tuple(batches)
+        for item in step_pairs:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                raise ValueError("Each batch must be an (inputs, targets) pair")
+            x, y = item
+            if (not isinstance(x, torch.Tensor) or not isinstance(y, torch.Tensor)
+                    or x.ndim != 2 or x.numel() == 0 or x.dtype != torch.long
+                    or y.shape != x.shape or y.dtype != torch.long):
+                raise ValueError("Each batch pair must be non-empty [B,T] long tensors")
+            if x.shape != inputs.shape:
+                raise ValueError("Every batch must match the input shape")
 
     synchronize_upstream_weights(ours, upstream)  # Once, before step one.
     local_opt = configure_adamw(
@@ -115,11 +133,11 @@ def compare_grouped_adamw_trajectory(
     try:
         ours.eval()
         upstream.eval()
-        for step in range(1, steps + 1):
+        for step, (step_inputs, step_targets) in enumerate(step_pairs, start=1):
             local_opt.zero_grad(set_to_none=True)
             reference_opt.zero_grad(set_to_none=True)
-            _, local_loss = ours.forward_nanogpt(inputs, targets)
-            _, reference_loss = upstream(inputs, targets)
+            _, local_loss = ours.forward_nanogpt(step_inputs, step_targets)
+            _, reference_loss = upstream(step_inputs, step_targets)
             torch.testing.assert_close(
                 local_loss.detach(), reference_loss.detach(),
                 atol=atol, rtol=rtol,
