@@ -91,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         f"improved batches={result.directions.batch_directions.improved}/"
         f"{result.directions.batch_directions.total}"
     )
+    global_coverage = result.paired.cross_seed_overlap
+    print(
+        f"global unique token positions={global_coverage.unique_corpus_token_positions}; "
+        f"repeated between seeds={global_coverage.repeated_positions_between_seeds}"
+    )
     if args.csv is not None:
         target = Path(args.csv)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -124,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
             {"seed": seed, **asdict(overlap)}
             for seed, overlap in zip(result.paired.seeds, result.paired.overlap_by_seed)
         ]
+        report["cross_seed_overlap"] = {
+            **asdict(global_coverage),
+            "coverage_fraction": global_coverage.coverage_fraction,
+            "total_repeated_positions": global_coverage.total_repeated_positions,
+        }
         report["lattice_by_seed"] = [
             {"seed": seed, **asdict(lattice)} if lattice is not None
             else {"seed": seed, "lattice": None}
@@ -143,9 +153,11 @@ def main(argv: list[str] | None = None) -> int:
             "With-replacement windows can overlap. Fixed and shifted "
             "T+1 tile lattices change the sampling distribution. Shifted "
             "lattice feasible phases depend on the requested sample count. "
-            "All samples still come from one held-out corpus; paired "
-            "differences and improvement counts are not independent "
-            "observations or statistical significance tests."
+            "All samples still come from one held-out corpus. Per-seed "
+            "overlap counts do not capture shared coverage between seeds; "
+            "global repeated positions include both. Paired differences "
+            "and improvement counts are not independent observations "
+            "or statistical significance tests."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
