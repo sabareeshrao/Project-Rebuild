@@ -1120,3 +1120,38 @@ confidence interval or statistical significance. Repeated RNG seeds
 can still select overlapping windows from one corpus. The standard
 training CLI and checkpoint selection policy remain unchanged.
 See lessons 173–177 in `lessons/`.
+
+## Paired validation diagnostics and saved checkpoint comparisons (commits 183–187)
+
+We can now inspect *per-batch* candidate-minus-baseline losses and
+count how often sampled validation batches or seed means improve,
+worsen or tie. These are **descriptive** measures: token windows
+overlap, so sign counts cannot be interpreted as independent
+Bernoulli trials or a statistical significance test.
+
+```bash
+# Compare existing self-contained GPT inference checkpoints on the
+# same held-out text and validation seeds:
+python examples/109_compare_saved_checkpoints.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --context 8 \
+  --csv out/paired_checkpoints.csv --json out/paired_checkpoints.json
+
+# Sweep the number of sampled validation batches:
+python examples/110_paired_budget_sweep.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt \
+  --eval-batch-counts 1,2,4,8 --seed-count 3 \
+  --csv out/paired_sweep.csv --json out/paired_sweep.json
+
+python -m pytest tests/test_paired_batch_evaluation.py \
+  tests/test_paired_diagnostics.py tests/test_checkpoint_comparison.py \
+  tests/test_saved_checkpoint_comparison_cli.py \
+  tests/test_paired_budget_sweep.py -q
+```
+
+Both checkpoints must store identical character-to-ID vocabulary
+order. The comparison uses the same contiguous 20% held-out split
+and identical seeded token windows. The sweep increases sample count
+without retraining or claiming any generalization confidence bound.
+See lessons 178–182 in `lessons/`.
