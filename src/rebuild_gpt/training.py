@@ -6,7 +6,9 @@ from typing import Protocol
 import torch
 
 from rebuild_gpt.precision import autocast_context, resolve_precision
-from rebuild_gpt.microbatches import split_microbatches
+from rebuild_gpt.microbatches import (
+    iter_weighted_microbatches, microbatch_sizes, split_microbatches,
+)
 
 
 class TrainableLanguageModel(Protocol):
@@ -179,3 +181,57 @@ def train_logical_batch_step(
         model, optimizer, parts, max_grad_norm=max_grad_norm,
         precision=precision, scaler=scaler,
     )
+
+
+def train_streamed_logical_batch_step(
+    model: TrainableLanguageModel,
+    optimizer: torch.optim.Optimizer,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    microbatch_size: int,
+    max_grad_norm: float | None = None,
+    precision: str = "fp32",
+    scaler: torch.cuda.amp.GradScaler | None = None,
+) -> float:
+    """Accumulate weighted losses while transferring one chunk at a time.
+
+    The logical batch can remain on CPU. Only the current microbatch
+    is moved to the model device; it is released after backward.
+    Exactly one optimizer update is attempted per logical batch.
+    """
+    if (
+        not isinstance(inputs, torch.Tensor)
+        or not isinstance(targets, torch.Tensor)
+        or inputs.ndim < 1 or targets.ndim < 1
+        or inputs.size(0) < 1 or inputs.size(0) != targets.size(0)
+        or targets.numel() == 0
+    ):
+        raise ValueError("inputs and targets must have the same nonempty batch axis")
+    microbatch_sizes(inputs.size(0), microbatch_size)
+    if max_grad_norm is not None and (
+        isinstance(max_grad_norm, bool)
+        or not isinstance(max_grad_norm, (float, int))
+        or not math.isfinite(max_grad_norm) or max_grad_norm <= 0
+    ):
+        raise ValueError("max_grad_norm must be finite and positive or None")
+    device = _check_amp(model, precision, scaler)
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    total_loss = 0.0
+    for source_x, source_y, weight in iter_weighted_microbatches(
+        inputs, targets, microbatch_size=microbatch_size,
+    ):
+        # Do not retain the whole logical batch on the accelerator.
+        chunk_x = source_x.to(device)
+        chunk_y = source_y.to(device)
+        with autocast_context(device, precision):
+            loss = model.loss(chunk_x, chunk_y)
+        if scaler is None:
+            (loss * weight).backward()
+        else:
+            scaler.scale(loss * weight).backward()
+        total_loss += loss.detach().item() * weight
+        del loss, chunk_x, chunk_y
+    _finish_optimizer_step(model, optimizer, max_grad_norm, scaler)
+    return total_loss
