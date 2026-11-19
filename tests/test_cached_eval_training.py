@@ -47,17 +47,16 @@ def test_eval_cache_is_prepared_once_per_split(tmp_path, monkeypatch):
     import rebuild_gpt.text_training as training
 
     called = []
-    original = training.prepare_evaluation_batches
+    original = training.prepare_train_val_evaluation_batches
 
-    def spy(tokens, **kwargs):
-        called.append((tokens.numel(), kwargs["seed"]))
-        return original(tokens, **kwargs)
+    def spy(train, validation, **kwargs):
+        called.append((train.numel(), validation.numel(), kwargs["seed"]))
+        return original(train, validation, **kwargs)
 
-    monkeypatch.setattr(training, "prepare_evaluation_batches", spy)
+    monkeypatch.setattr(training, "prepare_train_val_evaluation_batches", spy)
     train_char_gpt(corpus(tmp_path), eval_batch_backend="cached", **options())
-    assert len(called) == 2
-    assert called[0][1] == 165
-    assert called[1][1] == 166
+    assert len(called) == 1
+    assert called[0][2] == 165
 
 
 def test_resume_preserves_cached_evaluation_policy_and_weights(tmp_path):

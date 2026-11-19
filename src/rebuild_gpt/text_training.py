@@ -16,7 +16,7 @@ from rebuild_gpt.optimizers import configure_adamw
 from rebuild_gpt.precision import autocast_context, make_grad_scaler, resolve_precision
 from rebuild_gpt.schedule import cosine_warmup_lr
 from rebuild_gpt.evaluation import estimate_train_val_loss, evaluate_prepared_train_val_loss
-from rebuild_gpt.eval_cache import prepare_evaluation_batches
+from rebuild_gpt.eval_cache import prepare_train_val_evaluation_batches
 from rebuild_gpt.text_checkpoint import save_text_checkpoint
 from rebuild_gpt.text_resume import load_text_training_state, save_text_training_state
 from rebuild_gpt.tokenizer import CharTokenizer
@@ -61,6 +61,7 @@ def train_char_gpt(
     checkpoint_every_n: int | None = None,
     sampling_backend: str = "indexed",
     eval_batch_backend: str = "regenerate",
+    eval_cache_max_mib: float | None = None,
 ) -> tuple[GPTLanguageModel, CharTokenizer, dict[str, float]]:
     """Train on contiguous corpus tokens and report fixed-batch validation loss.
 
@@ -107,6 +108,20 @@ def train_char_gpt(
         raise ValueError("cached eval_batch_backend requires sampled validation_mode")
     if eval_batch_backend == "cached" and eval_interval is None:
         raise ValueError("cached eval_batch_backend requires eval_interval")
+    cache_max_bytes = None
+    if eval_cache_max_mib is not None:
+        if (
+            isinstance(eval_cache_max_mib, bool)
+            or not isinstance(eval_cache_max_mib, (int, float))
+            or not math.isfinite(eval_cache_max_mib)
+            or eval_cache_max_mib <= 0
+        ):
+            raise ValueError("eval_cache_max_mib must be finite and positive")
+        if eval_batch_backend != "cached":
+            raise ValueError("eval_cache_max_mib requires cached eval_batch_backend")
+        cache_max_bytes = int(eval_cache_max_mib * (1024 * 1024))
+        if cache_max_bytes < 1:
+            raise ValueError("eval_cache_max_mib must allow at least one byte")
     if type(gradient_accumulation_steps) is not int or gradient_accumulation_steps < 1:
         raise ValueError("gradient_accumulation_steps must be positive")
     if microbatch_size is not None:
@@ -196,6 +211,8 @@ def train_char_gpt(
         controls["sampling_backend"] = sampling_backend
     if eval_batch_backend != "regenerate":
         controls["eval_batch_backend"] = eval_batch_backend
+    if eval_cache_max_mib is not None:
+        controls["eval_cache_max_mib"] = float(eval_cache_max_mib)
 
     train_sampler = (
         CachedWindowSampler(train, block_size=block_size)
@@ -235,15 +252,11 @@ def train_char_gpt(
     # The cached evaluator samples the same fixed CPU batches that
     # estimate_train_val_loss would recreate at every evaluation step.
     prepared_evaluation = (
-        (
-            prepare_evaluation_batches(
-                train, batch_size=batch_size, block_size=block_size,
-                eval_batches=eval_batches, seed=seed + 2,
-            ),
-            prepare_evaluation_batches(
-                validation, batch_size=batch_size, block_size=block_size,
-                eval_batches=eval_batches, seed=seed + 3,
-            ),
+        prepare_train_val_evaluation_batches(
+            train, validation,
+            batch_size=batch_size, block_size=block_size,
+            eval_batches=eval_batches, seed=seed + 2,
+            max_bytes=cache_max_bytes,
         )
         if eval_batch_backend == "cached" else None
     )
