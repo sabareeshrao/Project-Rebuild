@@ -25,8 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batches", type=int, default=3)
     parser.add_argument("--first-seed", type=int, default=186)
     parser.add_argument("--seed-count", type=int, default=3)
-    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint"),
-                        default="replacement", help="Original random starts or nonoverlapping T+1 tiles")
+    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint", "shifted"),
+                        default="replacement",
+                        help="Original random starts, fixed-origin tiles, or seed-shifted tiles")
     parser.add_argument("--csv", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -52,15 +53,23 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(str(exc))
 
     rows = []
-    for seed, baseline_loss, candidate_loss, delta, batch_deltas, overlap in zip(
+    for seed, baseline_loss, candidate_loss, delta, batch_deltas, overlap, lattice in zip(
         result.paired.seeds, result.paired.baseline_losses,
         result.paired.candidate_losses,
         result.paired.per_seed_means, result.paired.differences,
-        result.paired.overlap_by_seed,
+        result.paired.overlap_by_seed, result.paired.lattice_by_seed,
     ):
         rows.append({
             "seed": seed,
             "sampling_policy": args.sampling_policy,
+            "lattice_phase": lattice.phase if lattice is not None else None,
+            "feasible_lattice_phases": (
+                lattice.phase_count_feasible_for_budget
+                if lattice is not None else None
+            ),
+            "candidate_tiles_at_phase": (
+                lattice.candidate_tiles_at_phase if lattice is not None else None
+            ),
             "duplicate_starts": overlap.duplicate_start_count,
             "repeated_window_token_positions": overlap.repeated_window_token_positions,
             "unique_corpus_token_positions": overlap.unique_corpus_token_positions,
@@ -115,6 +124,13 @@ def main(argv: list[str] | None = None) -> int:
             {"seed": seed, **asdict(overlap)}
             for seed, overlap in zip(result.paired.seeds, result.paired.overlap_by_seed)
         ]
+        report["lattice_by_seed"] = [
+            {"seed": seed, **asdict(lattice)} if lattice is not None
+            else {"seed": seed, "lattice": None}
+            for seed, lattice in zip(
+                result.paired.seeds, result.paired.lattice_by_seed,
+            )
+        ]
         directions = asdict(result.directions)
         # Dataclass properties (total/improved_fraction) are not
         # included by asdict; expose them explicitly for report readers.
@@ -124,11 +140,12 @@ def main(argv: list[str] | None = None) -> int:
             counts["improved_fraction"] = counts["improved"] / counts["total"]
         report["direction_diagnostics"] = directions
         report["limitations"] = (
-            "With-replacement windows can overlap; disjoint windows use "
-            "a fixed T+1 tiling that changes the sampling distribution. "
-            "All samples still come from one held-out corpus. Paired "
-            "differences and improvement counts are descriptive, not "
-            "independent trials or statistical significance tests."
+            "With-replacement windows can overlap. Fixed and shifted "
+            "T+1 tile lattices change the sampling distribution. Shifted "
+            "lattice feasible phases depend on the requested sample count. "
+            "All samples still come from one held-out corpus; paired "
+            "differences and improvement counts are not independent "
+            "observations or statistical significance tests."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)
