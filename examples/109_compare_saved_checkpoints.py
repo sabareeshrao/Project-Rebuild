@@ -25,9 +25,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--eval-batches", type=int, default=3)
     parser.add_argument("--first-seed", type=int, default=186)
     parser.add_argument("--seed-count", type=int, default=3)
-    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint", "shifted"),
-                        default="replacement",
-                        help="Original random starts, fixed-origin tiles, or seed-shifted tiles")
+    parser.add_argument(
+        "--sampling-policy",
+        choices=("replacement", "disjoint", "shifted", "balanced"),
+        default="replacement",
+        help="Original random starts, fixed/shifted tiles, or balanced regional starts",
+    )
+    parser.add_argument(
+        "--sampling-regions", type=int, default=None,
+        help="Positive number of eligible-start regions; only for balanced sampling",
+    )
     parser.add_argument("--csv", default=None)
     parser.add_argument("--json", default=None)
     args = parser.parse_args(argv)
@@ -36,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         or args.seed_count < 1 or args.first_seed < 0
     ):
         parser.error("batch-size, context, eval-batches and seed-count must be positive; first-seed nonnegative")
+    if args.sampling_regions is not None:
+        if args.sampling_policy != "balanced":
+            parser.error("--sampling-regions requires --sampling-policy balanced")
+        if args.sampling_regions < 1:
+            parser.error("--sampling-regions must be positive")
     sources = {Path(p).resolve() for p in (args.baseline, args.candidate, args.corpus)}
     outputs = [Path(p).resolve() for p in (args.csv, args.json) if p is not None]
     if len(set(outputs)) != len(outputs) or any(p in sources for p in outputs):
@@ -48,20 +60,28 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=args.batch_size, block_size=args.context,
             eval_batches=args.eval_batches, device=args.device,
             sampling_policy=args.sampling_policy,
+            sampling_regions=args.sampling_regions if args.sampling_regions is not None else 4,
         )
     except (ValueError, OSError, RuntimeError) as exc:
         parser.error(str(exc))
 
     rows = []
-    for seed, baseline_loss, candidate_loss, delta, batch_deltas, overlap, lattice in zip(
+    for seed, baseline_loss, candidate_loss, delta, batch_deltas, overlap, lattice, starts in zip(
         result.paired.seeds, result.paired.baseline_losses,
         result.paired.candidate_losses,
         result.paired.per_seed_means, result.paired.differences,
         result.paired.overlap_by_seed, result.paired.lattice_by_seed,
+        result.paired.start_regions_by_seed,
     ):
         rows.append({
             "seed": seed,
             "sampling_policy": args.sampling_policy,
+            "sampling_regions": result.sampling_regions,
+            "start_region_counts": (
+                ",".join(map(str, starts.counts)) if starts is not None else None
+            ),
+            "empty_start_regions": starts.empty_regions if starts is not None else None,
+            "start_region_imbalance": starts.imbalance if starts is not None else None,
             "lattice_phase": lattice.phase if lattice is not None else None,
             "feasible_lattice_phases": (
                 lattice.phase_count_feasible_for_budget
@@ -120,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
                 "first_seed": args.first_seed,
                 "seed_count": args.seed_count,
                 "sampling_policy": args.sampling_policy,
+                "sampling_regions": result.sampling_regions,
                 "validation_fraction": 0.2,
                 "optimizer_updates_during_comparison": 0,
             },
@@ -134,6 +155,13 @@ def main(argv: list[str] | None = None) -> int:
             "coverage_fraction": global_coverage.coverage_fraction,
             "total_repeated_positions": global_coverage.total_repeated_positions,
         }
+        report["start_regions_by_seed"] = [
+            {"seed": seed, **asdict(starts)} if starts is not None
+            else {"seed": seed, "regions": None}
+            for seed, starts in zip(
+                result.paired.seeds, result.paired.start_regions_by_seed,
+            )
+        ]
         report["lattice_by_seed"] = [
             {"seed": seed, **asdict(lattice)} if lattice is not None
             else {"seed": seed, "lattice": None}
@@ -151,7 +179,10 @@ def main(argv: list[str] | None = None) -> int:
         report["direction_diagnostics"] = directions
         report["limitations"] = (
             "With-replacement windows can overlap. Fixed and shifted "
-            "T+1 tile lattices change the sampling distribution. Shifted "
+            "T+1 tile lattices change the sampling distribution. Balanced "
+            "sampling allocates nearly equal start counts to corpus regions "
+            "but can still overlap and does not ensure equal token coverage. "
+            "Shifted "
             "lattice feasible phases depend on the requested sample count. "
             "All samples still come from one held-out corpus. Per-seed "
             "overlap counts do not capture shared coverage between seeds; "
