@@ -24,6 +24,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=3)
     parser.add_argument("--context", type=int, default=4)
     parser.add_argument("--eval-batch-counts", default="1,2,4")
+    parser.add_argument("--sampling-policy", choices=("replacement", "disjoint", "both"),
+                        default="replacement", help="Compare original, disjoint, or both policies")
     parser.add_argument("--first-seed", type=int, default=187)
     parser.add_argument("--seed-count", type=int, default=3)
     parser.add_argument("--csv", default=None)
@@ -45,31 +47,48 @@ def main(argv: list[str] | None = None) -> int:
         device = resolve_device(args.device)
         chosen = tuple(range(args.first_seed, args.first_seed + args.seed_count))
         rows = []
-        for count in counts:
-            result = compare_saved_checkpoints(
-                args.baseline, args.candidate, args.corpus,
-                seeds=chosen, batch_size=args.batch_size,
-                block_size=args.context, eval_batches=count,
-                device=args.device,
-            )
-            directions = result.directions.seed_mean_directions
-            rows.append({
-                "eval_batches_per_seed": count,
-                "seeds": args.seed_count,
-                "sampled_target_positions_per_model":
-                    count * args.seed_count * args.batch_size * args.context,
-                "mean_candidate_minus_baseline": result.paired.per_seed_summary.mean,
-                "sample_stdev_across_seed_means":
-                    result.paired.per_seed_summary.sample_stdev,
-                "improved_seed_means": directions.improved,
-                "worsened_seed_means": directions.worsened,
-                "tied_seed_means": directions.tied,
-            })
+        policies = (
+            ("replacement", "disjoint")
+            if args.sampling_policy == "both" else (args.sampling_policy,)
+        )
+        for policy in policies:
+            for count in counts:
+                result = compare_saved_checkpoints(
+                    args.baseline, args.candidate, args.corpus,
+                    seeds=chosen, batch_size=args.batch_size,
+                    block_size=args.context, eval_batches=count,
+                    device=args.device, sampling_policy=policy,
+                )
+                directions = result.directions.seed_mean_directions
+                overlaps = result.paired.overlap_by_seed
+                rows.append({
+                    "sampling_policy": policy,
+                    "eval_batches_per_seed": count,
+                    "seeds": args.seed_count,
+                    "sampled_target_positions_per_model":
+                        count * args.seed_count * args.batch_size * args.context,
+                    "mean_candidate_minus_baseline": result.paired.per_seed_summary.mean,
+                    "sample_stdev_across_seed_means":
+                        result.paired.per_seed_summary.sample_stdev,
+                    "improved_seed_means": directions.improved,
+                    "worsened_seed_means": directions.worsened,
+                    "tied_seed_means": directions.tied,
+                    "duplicate_starts_across_seeds": sum(
+                        item.duplicate_start_count for item in overlaps
+                    ),
+                    "repeated_window_positions_across_seeds": sum(
+                        item.repeated_window_token_positions for item in overlaps
+                    ),
+                    "total_unique_corpus_positions_across_seed_plans": sum(
+                        item.unique_corpus_token_positions for item in overlaps
+                    ),
+                })
     except (ValueError, OSError, RuntimeError) as exc:
         parser.error(str(exc))
 
     for row in rows:
         print(
+            f"policy={row['sampling_policy']} "
             f"eval_batches={row['eval_batches_per_seed']} "
             f"paired_mean_delta={row['mean_candidate_minus_baseline']:+.6f} "
             f"seed_stdev={row['sample_stdev_across_seed_means']}"
@@ -91,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
                 "batch_size": args.batch_size,
                 "context": args.context,
                 "eval_batch_counts": list(counts),
+                "sampling_policy": args.sampling_policy,
                 "first_seed": args.first_seed,
                 "seed_count": args.seed_count,
                 "validation_fraction": 0.2,
@@ -99,10 +119,13 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
         report["limitations"] = (
-            "Larger budgets reuse earlier windows for each seed, so sweep "
-            "rows are dependent. Overlapping windows from one held-out "
-            "corpus are not independent statistical trials; differences "
-            "are descriptive, not calibrated confidence intervals."
+            "Larger budgets reuse earlier sampled windows for each seed, "
+            "so sweep rows are dependent. Replacement and disjoint sample "
+            "different distributions; disjoint windows use a fixed T+1 "
+            "grid. All windows still come from one held-out corpus, and "
+            "different seeds may reuse tiles. Overlap totals are summed "
+            "within seeds, not globally de-duplicated. Differences are "
+            "descriptive, not calibrated confidence intervals."
         )
         write_benchmark_report(args.json, report)
         print("JSON:", args.json)

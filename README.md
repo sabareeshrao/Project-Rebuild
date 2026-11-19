@@ -1155,3 +1155,36 @@ order. The comparison uses the same contiguous 20% held-out split
 and identical seeded token windows. The sweep increases sample count
 without retraining or claiming any generalization confidence bound.
 See lessons 178–182 in `lessons/`.
+
+## Overlap-aware paired validation (commits 188–192)
+
+Sampled held-out windows can repeat starts or overlap in token
+positions. The new diagnostics count both, while an opt-in
+`disjoint` policy samples nonoverlapping fixed T+1-token tiles
+without replacement **within each seed's plan**.
+
+```bash
+# Original policy stays the default; disjoint is explicit:
+python examples/109_compare_saved_checkpoints.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt \
+  --sampling-policy disjoint --context 8 --eval-batches 3 \
+  --csv out/disjoint_checkpoints.csv --json out/disjoint_checkpoints.json
+
+# Compare validation sample counts under both policies:
+python examples/110_paired_budget_sweep.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-policy both \
+  --eval-batch-counts 1,2,4 \
+  --csv out/policy_sweep.csv --json out/policy_sweep.json
+
+python -m pytest tests/test_window_overlap.py \
+  tests/test_disjoint_evaluation.py tests/test_disjoint_paired_validation.py \
+  tests/test_disjoint_checkpoint_cli.py tests/test_policy_budget_sweep.py -q
+```
+
+Disjoint tiling changes the distribution of possible starts; it
+does **not** make one corpus independent observations. Different
+seeds may choose the same tile, and a disjoint plan requires enough
+tiles for all requested windows. No statistical significance or
+generalization guarantee is implied. See lessons 183–187.
