@@ -93,3 +93,80 @@ def compare_gradients_against_upstream(
     finally:
         ours.train(ours_was_training)
         upstream.train(upstream_was_training)
+
+
+@dataclass(frozen=True)
+class AdamWStepParityResult:
+    matched_gradients: int
+    max_gradient_error: float
+    matched_parameter_tensors: int
+    max_updated_weight_error: float
+    largest_local_parameter_change: float
+
+
+def compare_one_adamw_step(
+    ours: GPTLanguageModel,
+    upstream: torch.nn.Module,
+    inputs: torch.Tensor,
+    targets: torch.Tensor,
+    *,
+    learning_rate: float = 0.001,
+    weight_decay: float = 0.01,
+    atol: float = 2e-5,
+    rtol: float = 1e-5,
+) -> AdamWStepParityResult:
+    """Compare ONE identical AdamW update, not upstream training-loop behavior.
+
+    Both model objects are updated IN PLACE. We first check gradients,
+    then apply the same plain torch.optim.AdamW settings to both models.
+    This does NOT exercise nanoGPT's grouped configure_optimizers method.
+    """
+    import math
+
+    from rebuild_gpt.nanogpt_keys import export_nanogpt_state_dict
+
+    if (isinstance(learning_rate, bool) or not isinstance(learning_rate, (float, int))
+            or not math.isfinite(learning_rate) or learning_rate <= 0):
+        raise ValueError("learning_rate must be finite and positive")
+    if (isinstance(weight_decay, bool) or not isinstance(weight_decay, (float, int))
+            or not math.isfinite(weight_decay) or weight_decay < 0):
+        raise ValueError("weight_decay must be finite and nonnegative")
+
+    gradients = compare_gradients_against_upstream(
+        ours, upstream, inputs, targets, atol=atol, rtol=rtol,
+    )
+    before = export_nanogpt_state_dict(ours)
+    # These are deliberately identical PyTorch optimizers on both models.
+    local_optimizer = torch.optim.AdamW(
+        ours.parameters(), lr=learning_rate, weight_decay=weight_decay,
+        betas=(0.9, 0.95), eps=1e-8,
+    )
+    upstream_optimizer = torch.optim.AdamW(
+        upstream.parameters(), lr=learning_rate, weight_decay=weight_decay,
+        betas=(0.9, 0.95), eps=1e-8,
+    )
+    local_optimizer.step()
+    upstream_optimizer.step()
+
+    local_after = export_nanogpt_state_dict(ours)
+    reference_after = upstream.state_dict()
+    missing = set(local_after) - set(reference_after)
+    if missing:
+        raise ValueError(f"Upstream is missing updated tensor keys: {sorted(missing)}")
+    maximum_error = 0.0
+    maximum_change = 0.0
+    for name in sorted(local_after):
+        ours_tensor = local_after[name]
+        theirs_tensor = reference_after[name]
+        try:
+            torch.testing.assert_close(
+                ours_tensor, theirs_tensor, atol=atol, rtol=rtol,
+            )
+        except AssertionError as exc:
+            raise AssertionError(f"Updated weight mismatch at {name}: {exc}") from exc
+        maximum_error = max(maximum_error, (ours_tensor - theirs_tensor).abs().max().item())
+        maximum_change = max(maximum_change, (ours_tensor - before[name]).abs().max().item())
+    return AdamWStepParityResult(
+        gradients.matched_tensors, gradients.max_absolute_error,
+        len(local_after), maximum_error, maximum_change,
+    )
