@@ -13,11 +13,9 @@ import torch
 
 from rebuild_gpt.balanced_evaluation import prepare_balanced_evaluation_index_plan
 from rebuild_gpt.benchmark_report import build_benchmark_report, write_benchmark_report
-from rebuild_gpt.cross_seed_overlap import analyze_cross_seed_overlap
+from rebuild_gpt.sampling_policy_audit import audit_start_and_token_coverage
 from rebuild_gpt.data import load_corpus, split_train_val
-from rebuild_gpt.position_coverage import analyze_position_coverage
 from rebuild_gpt.scaling_grid import parse_positive_sizes
-from rebuild_gpt.start_region_summary import summarize_start_regions
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,10 +70,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 for index in range(args.seed_count)
             )
-            starts = summarize_start_regions(plans, region_count=regions)
-            overlap = analyze_cross_seed_overlap(plans)
-            positions = analyze_position_coverage(
-                plans, position_bins=args.position_bins,
+            audit = audit_start_and_token_coverage(
+                plans, start_regions=regions, token_bins=args.position_bins,
+            )
+            starts, overlap, positions = (
+                audit.start_regions, audit.cross_seed_overlap, audit.token_positions,
             )
             rows.append({
                 "sampling_regions": regions,
@@ -89,6 +88,12 @@ def main(argv: list[str] | None = None) -> int:
                 "global_token_coverage_fraction": overlap.coverage_fraction,
                 "repeated_positions_between_seeds": overlap.repeated_positions_between_seeds,
                 "empty_token_coverage_bins": positions.zero_coverage_bins,
+                "all_seeds_touch_every_start_region": (
+                    audit.all_seeds_touch_every_start_region
+                ),
+                "start_balance_can_hide_token_gaps": (
+                    audit.start_balance_without_full_token_bin_coverage
+                ),
                 "least_covered_token_bin_fraction": min(
                     bin.coverage_fraction for bin in positions.bins
                 ),
@@ -100,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
                     for plan, summary in zip(plans, starts.per_seed)
                 ],
                 "token_coverage_bins": [asdict(bin) for bin in positions.bins],
+                "audit_flags": {
+                    "all_seeds_touch_every_start_region":
+                        audit.all_seeds_touch_every_start_region,
+                    "any_unsampled_token_bin": audit.any_unsampled_token_bin,
+                    "start_balance_can_hide_token_gaps":
+                        audit.start_balance_without_full_token_bin_coverage,
+                },
             })
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
@@ -142,7 +154,8 @@ def main(argv: list[str] | None = None) -> int:
             "Start-region counts are explicitly balanced, but sampled windows "
             "can repeat or overlap. Start regions partition eligible start "
             "indices whereas position bins partition corpus tokens; they are "
-            "different quantities. Samples reuse one held-out corpus across "
+            "different quantities: zero empty start regions can coexist with "
+            "unsampled token bins. Samples reuse one held-out corpus across "
             "seeds. Coverage is descriptive, not a confidence interval, "
             "an independence test, or a claim of unbiased GPT validation."
         )

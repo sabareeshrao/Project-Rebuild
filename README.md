@@ -1361,3 +1361,39 @@ Paired evaluation and checkpoint comparison still default to
 means three policies; `extended` explicitly selects four.
 New reports distinguish start counts from actual token coverage.
 See lessons 208–212 in `lessons/`.
+
+## Auditing regional sampling balance across seeds (commits 219–223)
+
+A pooled start histogram can look balanced even when *each*
+validation seed fails to sample some start regions. The new
+`summarize_start_regions` reports pooled counts and the worst
+per-seed imbalance separately. Balanced paired GPT comparisons
+preserve the summary alongside paired losses and token overlap.
+
+```bash
+# Compare saved GPT checkpoints under the fourth, balanced policy:
+python examples/110_paired_budget_sweep.py \
+  --baseline out/model_before.pt --candidate out/model_after.pt \
+  --corpus data/tiny_story.txt --sampling-policy extended \
+  --sampling-regions 2 --batch-size 2 \
+  --eval-batch-counts 1,2,4 \
+  --csv out/paired_balanced_budget.csv --json out/paired_balanced_budget.json
+
+# Model-free experiment: region count versus real token coverage:
+python examples/113_balanced_region_sweep.py \
+  --corpus data/tiny_story.txt --region-counts 2,4,8 \
+  --position-bins 8 --csv out/start_regions.csv \
+  --json out/start_regions.json
+
+python -m pytest tests/test_start_region_summary.py \
+  tests/test_paired_start_region_summary.py \
+  tests/test_balanced_budget_sweep.py \
+  tests/test_balanced_region_sweep.py \
+  tests/test_sampling_policy_audit.py -q
+```
+
+The `audit_start_and_token_coverage` helper and region sweep flag
+cases where **every start region was sampled but some token
+position bins remain empty**. All statistics are descriptive,
+not unbiasedness tests, independent sample counts, or model
+generalization guarantees. See lessons 213–217.
