@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import torch
 
 from rebuild_gpt.eval_index_plan import prepare_evaluation_index_plan
+from rebuild_gpt.disjoint_evaluation import prepare_disjoint_evaluation_index_plan
+from rebuild_gpt.window_overlap import WindowOverlap, analyze_index_plan_overlap
 from rebuild_gpt.evaluation_samples import collect_split_losses
 from rebuild_gpt.evaluation_stats import LossDispersion, summarize_losses
 from rebuild_gpt.gpt import GPTLanguageModel
@@ -23,6 +25,8 @@ class PairedBatchValidation:
     differences: tuple[tuple[float, ...], ...]
     per_seed_means: tuple[float, ...]
     per_seed_summary: LossDispersion
+    overlap_by_seed: tuple[WindowOverlap, ...]
+    sampling_policy: str
 
 
 def compare_paired_batches(
@@ -34,6 +38,7 @@ def compare_paired_batches(
     batch_size: int,
     block_size: int,
     eval_batches: int = 4,
+    sampling_policy: str = "replacement",
 ) -> PairedBatchValidation:
     """Return the aligned per-batch candidate-minus-baseline losses."""
     if not isinstance(seeds, Sequence) or isinstance(seeds, (str, bytes)):
@@ -45,6 +50,8 @@ def compare_paired_batches(
         or len(set(chosen)) != len(chosen)
     ):
         raise ValueError("seeds must be unique nonnegative integers")
+    if sampling_policy not in ("replacement", "disjoint"):
+        raise ValueError("sampling_policy must be replacement or disjoint")
     if not isinstance(tokens, torch.Tensor):
         raise ValueError("tokens must be a tensor")
     if baseline.config.vocab_size != candidate.config.vocab_size:
@@ -56,11 +63,18 @@ def compare_paired_batches(
         raise ValueError("block_size exceeds a model context window")
 
     baseline_by_seed, candidate_by_seed, delta_by_seed, means = [], [], [], []
+    overlaps = []
+    plan_builder = (
+        prepare_disjoint_evaluation_index_plan
+        if sampling_policy == "disjoint"
+        else prepare_evaluation_index_plan
+    )
     for seed in chosen:
-        plan = prepare_evaluation_index_plan(
+        plan = plan_builder(
             tokens, batch_size=batch_size, block_size=block_size,
             eval_batches=eval_batches, seed=seed,
         )
+        overlaps.append(analyze_index_plan_overlap(plan))
         a = collect_split_losses(baseline, plan)
         b = collect_split_losses(candidate, plan)
         delta = tuple(y - x for x, y in zip(a, b))
@@ -75,4 +89,6 @@ def compare_paired_batches(
         differences=tuple(delta_by_seed),
         per_seed_means=tuple(means),
         per_seed_summary=summarize_losses(means),
+        overlap_by_seed=tuple(overlaps),
+        sampling_policy=sampling_policy,
     )

@@ -27,6 +27,7 @@ class SavedCheckpointComparison:
     candidate_config: dict
     paired: PairedBatchValidation
     directions: PairedDiagnostics
+    sampling_policy: str
 
 
 def compare_saved_checkpoints(
@@ -39,6 +40,7 @@ def compare_saved_checkpoints(
     block_size: int,
     eval_batches: int = 4,
     device: str = "cpu",
+    sampling_policy: str = "replacement",
 ) -> SavedCheckpointComparison:
     """Load trusted self-contained inference bundles and compare held-out loss.
 
@@ -63,6 +65,7 @@ def compare_saved_checkpoints(
         baseline.to(compute_device), candidate.to(compute_device),
         validation, seeds=seeds, batch_size=batch_size,
         block_size=block_size, eval_batches=eval_batches,
+        sampling_policy=sampling_policy,
     )
     return SavedCheckpointComparison(
         baseline_path=str(baseline_path),
@@ -74,4 +77,5 @@ def compare_saved_checkpoints(
         candidate_config=asdict(candidate.config),
         paired=paired,
         directions=summarize_paired_deltas(paired.differences),
+        sampling_policy=sampling_policy,
     )
