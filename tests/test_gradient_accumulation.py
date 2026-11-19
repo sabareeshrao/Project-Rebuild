@@ -60,7 +60,7 @@ def test_accumulation_rejects_empty_or_differently_sized_batches():
         train_accumulated_step(model, optimizer, [])
     a, b = samples()
     with pytest.raises(ValueError, match="matching"):
-        train_accumulated_step(model, optimizer, [a, (b[0][:1], b[1][:1])])
+        train_accumulated_step(model, optimizer, [a, (b[0][:1], b[1])])
 
 
 @pytest.mark.parametrize("bad", [0, -1, float("nan"), float("inf"), True])

@@ -93,7 +93,11 @@ def train_accumulated_step(
     precision: str = "fp32",
     scaler: torch.cuda.amp.GradScaler | None = None,
 ) -> float:
-    """Average equally sized microbatch losses, then take exactly one update."""
+    """Average per-target losses across microbatches; take one update.
+
+    Requires model.loss to be a mean over all target elements. An uneven
+    final microbatch receives weight proportional to its target count.
+    """
     if not microbatches:
         raise ValueError("microbatches must contain at least one batch")
     if max_grad_norm is not None and (
@@ -105,13 +109,19 @@ def train_accumulated_step(
         raise ValueError("max_grad_norm must be finite and positive or None")
     input_shape = microbatches[0][0].shape
     target_shape = microbatches[0][1].shape
+    same_size = True
+    total_targets = 0
     for inputs, targets in microbatches:
         if (
             inputs.ndim < 1 or targets.ndim < 1 or inputs.numel() == 0
-            or inputs.shape != input_shape or targets.shape != target_shape
+            or targets.numel() == 0
+            or inputs.shape[1:] != input_shape[1:]
+            or targets.shape[1:] != target_shape[1:]
             or inputs.size(0) != targets.size(0)
         ):
             raise ValueError("microbatches must have matching nonempty batch shapes")
+        same_size &= inputs.shape == input_shape and targets.shape == target_shape
+        total_targets += targets.numel()
 
     device = _check_amp(model, precision, scaler)
     model.train()
@@ -120,11 +130,20 @@ def train_accumulated_step(
     for inputs, targets in microbatches:
         with autocast_context(device, precision):
             loss = model.loss(inputs, targets)
-        normalized = loss / len(microbatches)
+        # The loss is a mean over target elements. For an uneven final
+        # microbatch, weight by its token count, not one per chunk.
+        # Retain the previous arithmetic for equal-sized chunks.
+        weight = targets.numel() / total_targets
+        normalized = (
+            loss / len(microbatches) if same_size else loss * weight
+        )
         if scaler is None:
             normalized.backward()
         else:
             scaler.scale(normalized).backward()
-        total_loss += loss.detach().item()
+        total_loss += (
+            loss.detach().item() if same_size
+            else loss.detach().item() * weight
+        )
     _finish_optimizer_step(model, optimizer, max_grad_norm, scaler)
-    return total_loss / len(microbatches)
+    return total_loss / len(microbatches) if same_size else total_loss
