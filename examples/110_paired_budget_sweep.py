@@ -73,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
                     seeds=chosen, batch_size=args.batch_size,
                     block_size=args.context, eval_batches=count,
                     device=args.device, sampling_policy=policy,
-                    sampling_regions=region_count,
+                    sampling_regions=(region_count if policy == "balanced" else 4),
                 )
                 directions = result.directions.seed_mean_directions
                 overlaps = result.paired.overlap_by_seed
